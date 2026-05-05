@@ -7,8 +7,16 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
@@ -51,6 +59,7 @@ import androidx.core.content.ContextCompat;
 import com.google.common.util.concurrent.ListenableFuture;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -466,6 +475,7 @@ public class MainActivity extends ComponentActivity {
             return;
         }
 
+        long capturedAt = System.currentTimeMillis();
         ImageCapture.OutputFileOptions options = new ImageCapture.OutputFileOptions.Builder(getContentResolver(), MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cameraContentValues()).build();
         imageCapture.takePicture(options, ContextCompat.getMainExecutor(this), new ImageCapture.OnImageSavedCallback() {
             @Override
@@ -475,8 +485,9 @@ public class MainActivity extends ComponentActivity {
                     Toast.makeText(MainActivity.this, "사진 저장 위치를 확인할 수 없습니다.", Toast.LENGTH_SHORT).show();
                     return;
                 }
+                stampSavedImage(savedUri, capturedAt);
                 markImageReady(savedUri);
-                addPhoto(savedUri.toString());
+                addPhoto(savedUri.toString(), capturedAt);
             }
 
             @Override
@@ -484,6 +495,117 @@ public class MainActivity extends ComponentActivity {
                 Toast.makeText(MainActivity.this, "촬영 저장에 실패했습니다.", Toast.LENGTH_SHORT).show();
             }
         });
+    }
+
+    private void stampSavedImage(Uri uri, long capturedAt) {
+        Bitmap bitmap = null;
+        Bitmap oriented = null;
+        Bitmap stamped = null;
+        try {
+            bitmap = decodeBitmap(uri, 3200);
+            if (bitmap == null) {
+                throw new IOException("Cannot decode captured image");
+            }
+            oriented = rotateBitmap(bitmap, readExifOrientation(uri));
+            stamped = drawTimestamp(oriented, "촬영: " + formatDate(capturedAt));
+            try (OutputStream output = getContentResolver().openOutputStream(uri, "w")) {
+                if (output == null) {
+                    throw new IOException("Cannot open captured image for writing");
+                }
+                stamped.compress(Bitmap.CompressFormat.JPEG, 92, output);
+            }
+        } catch (IOException e) {
+            Toast.makeText(this, "원본 사진 시간표시 저장에 실패했습니다.", Toast.LENGTH_SHORT).show();
+        } finally {
+            if (stamped != null && stamped != oriented) stamped.recycle();
+            if (oriented != null && oriented != bitmap) oriented.recycle();
+            if (bitmap != null) bitmap.recycle();
+        }
+    }
+
+    private Bitmap decodeBitmap(Uri uri, int maxSideLimit) throws IOException {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) return null;
+            BitmapFactory.decodeStream(input, null, bounds);
+        }
+
+        int maxSide = Math.max(bounds.outWidth, bounds.outHeight);
+        int sample = 1;
+        while (maxSide / sample > maxSideLimit) {
+            sample *= 2;
+        }
+
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sample;
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) return null;
+            return BitmapFactory.decodeStream(input, null, options);
+        }
+    }
+
+    private int readExifOrientation(Uri uri) {
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) {
+                return ExifInterface.ORIENTATION_NORMAL;
+            }
+            ExifInterface exif = new ExifInterface(input);
+            return exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+        } catch (IOException ignored) {
+            return ExifInterface.ORIENTATION_NORMAL;
+        }
+    }
+
+    private Bitmap rotateBitmap(Bitmap source, int orientation) {
+        int degrees;
+        switch (orientation) {
+            case ExifInterface.ORIENTATION_ROTATE_90:
+                degrees = 90;
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_180:
+                degrees = 180;
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_270:
+                degrees = 270;
+                break;
+            default:
+                return source;
+        }
+
+        Matrix matrix = new Matrix();
+        matrix.postRotate(degrees);
+        return Bitmap.createBitmap(source, 0, 0, source.getWidth(), source.getHeight(), matrix, true);
+    }
+
+    private Bitmap drawTimestamp(Bitmap source, String stampText) {
+        Bitmap output = source.copy(Bitmap.Config.ARGB_8888, true);
+        Canvas canvas = new Canvas(output);
+
+        float textSize = Math.max(32f, output.getWidth() * 0.025f);
+        float paddingX = textSize * 0.55f;
+        float paddingY = textSize * 0.32f;
+        float margin = textSize * 0.55f;
+
+        Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
+        textPaint.setColor(Color.WHITE);
+        textPaint.setTextSize(textSize);
+        textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+
+        Rect bounds = new Rect();
+        textPaint.getTextBounds(stampText, 0, stampText.length(), bounds);
+        Paint.FontMetrics metrics = textPaint.getFontMetrics();
+
+        float boxW = bounds.width() + paddingX * 2f;
+        float boxH = (metrics.descent - metrics.ascent) + paddingY * 2f;
+        float left = output.getWidth() - boxW - margin;
+        float top = output.getHeight() - boxH - margin;
+
+        Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        bgPaint.setColor(Color.argb(175, 0, 0, 0));
+        canvas.drawRect(new RectF(left, top, left + boxW, top + boxH), bgPaint);
+        canvas.drawText(stampText, left + paddingX, top + paddingY - metrics.ascent, textPaint);
+        return output;
     }
 
     private void markImageReady(Uri uri) {
@@ -502,14 +624,18 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void addPhoto(String uri) {
+        addPhoto(uri, System.currentTimeMillis());
+    }
+
+    private void addPhoto(String uri, long createdAt) {
         String symbol = selectedSymbol();
         PhotoItem item = new PhotoItem();
-        item.id = String.valueOf(System.currentTimeMillis()) + "-" + Math.round(Math.random() * 100000);
+        item.id = String.valueOf(createdAt) + "-" + Math.round(Math.random() * 100000);
         item.category = currentCategory;
         item.symbol = symbol;
         item.memo = memoInput.getText().toString().trim();
         item.uri = uri;
-        item.createdAt = System.currentTimeMillis();
+        item.createdAt = createdAt;
         photos.add(item);
 
         memoInput.setText("");
@@ -782,7 +908,7 @@ public class MainActivity extends ComponentActivity {
         html.append(".card{position:absolute;left:31mm;width:128mm;height:68mm;break-inside:avoid}");
         html.append(".card.top{top:56mm}.card.bottom{top:156mm}");
         html.append(".frame{position:relative;width:100%;height:100%;background:#f5f5f5;overflow:hidden}");
-        html.append("img{width:100%;height:100%;object-fit:contain;display:block}");
+        html.append("img{width:100%;height:100%;object-fit:cover;display:block}");
         html.append(".stamp{position:absolute;right:3mm;bottom:3mm;background:rgba(0,0,0,.72);color:#fff;padding:1.5mm 2.2mm;text-align:right;font-size:8.5pt}");
         html.append(".caption{text-align:center;font-size:11pt;margin-top:5mm}");
         html.append(".office{position:absolute;right:0;bottom:0;font-size:10pt}");

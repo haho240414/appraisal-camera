@@ -154,7 +154,7 @@ final class PptxExporter {
         Canvas canvas = new Canvas(output);
         canvas.drawColor(Color.rgb(245, 245, 245));
 
-        float scale = Math.min(
+        float scale = Math.max(
                 (float) NORMALIZED_IMAGE_WIDTH / source.getWidth(),
                 (float) NORMALIZED_IMAGE_HEIGHT / source.getHeight()
         );
