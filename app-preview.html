@@ -14,7 +14,7 @@
         min-height: 100vh;
         display: grid;
         place-items: center;
-        background: #eef1f5;
+        background: #e7ebef;
         font-family: "Malgun Gothic", system-ui, sans-serif;
         color: #15171a;
       }
@@ -37,13 +37,14 @@
 
       .topbar {
         position: absolute;
-        inset: 12px 12px auto;
+        inset: 10px 10px auto;
         display: flex;
         align-items: center;
-        gap: 8px;
-        padding: 10px 12px;
-        background: rgba(0, 0, 0, 0.68);
+        gap: 6px;
+        padding: 7px 10px;
+        background: rgba(9, 14, 18, 0.65);
         color: #fff;
+        border-radius: 10px;
       }
 
       .title {
@@ -52,24 +53,25 @@
 
       .title strong {
         display: block;
-        font-size: 22px;
+        font-size: 18px;
       }
 
       .title span {
         display: block;
         margin-top: 3px;
         color: #dce2e6;
-        font-size: 12px;
+        font-size: 11px;
       }
 
       button {
-        min-height: 38px;
+        min-height: 34px;
         border: 0;
-        border-radius: 6px;
-        padding: 0 11px;
+        border-radius: 8px;
+        padding: 0 10px;
         background: #f5f7f9;
         color: #15171a;
         font-weight: 800;
+        border: 1px solid #d5dce4;
       }
 
       .panel {
@@ -81,6 +83,8 @@
         transform-origin: bottom center;
         padding: 10px;
         background: rgba(255, 255, 255, 0.82);
+        border: 1px solid rgba(204, 212, 222, 0.7);
+        border-radius: 12px;
       }
 
       .tabs {
@@ -92,18 +96,18 @@
       .tab {
         display: grid;
         place-items: center;
-        min-height: 44px;
+        min-height: 38px;
         border: 1px solid #d9dee7;
-        border-radius: 6px;
-        color: #68707d;
+        border-radius: 8px;
+        color: #47505b;
         font-weight: 800;
-        background: #fff;
+        background: #f7f9fb;
       }
 
       .tab.active {
-        border-color: #166c7d;
-        color: #0d5361;
-        background: #edf5f7;
+        border-color: #116779;
+        color: #fff;
+        background: #116779;
       }
 
       .row {
@@ -114,15 +118,15 @@
       }
 
       .input {
-        min-height: 46px;
+        min-height: 40px;
         display: flex;
         align-items: center;
         padding: 0 12px;
         border: 1px solid #d9dee7;
-        border-radius: 6px;
+        border-radius: 8px;
         background: #fff;
         color: #15171a;
-        font-size: 14px;
+        font-size: 13px;
       }
 
       .memo {
@@ -140,15 +144,16 @@
       .capture {
         background: #166c7d;
         color: #fff;
+        border-color: #0d5564;
       }
 
       .footer {
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-top: 10px;
+        margin-top: 8px;
         color: #68707d;
-        font-size: 13px;
+        font-size: 12px;
       }
 
       .footer span {
@@ -159,12 +164,13 @@
         position: absolute;
         left: 18px;
         right: 18px;
-        top: 104px;
+        top: 86px;
         padding: 9px 11px;
         background: rgba(0, 0, 0, 0.55);
         color: #fff;
         font-size: 12px;
         text-align: center;
+        border-radius: 8px;
       }
 
       .address {

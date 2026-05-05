@@ -16,6 +16,7 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Bundle;
@@ -96,6 +97,7 @@ public class MainActivity extends ComponentActivity {
     private TextView statusText;
     private TextView countText;
     private LinearLayout controlsPanel;
+    private RadioGroup categoryGroup;
     private Spinner symbolSpinner;
     private Spinner buildingSubSpinner;
     private EditText addressInput;
@@ -139,14 +141,14 @@ public class MainActivity extends ComponentActivity {
 
         LinearLayout overlay = new LinearLayout(this);
         overlay.setOrientation(LinearLayout.VERTICAL);
-        overlay.setPadding(dp(12), dp(12), dp(12), dp(12));
+        overlay.setPadding(dp(10), dp(10), dp(10), dp(10));
         root.addView(overlay, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(12), dp(10), dp(12), dp(10));
-        header.setBackgroundColor(Color.argb(168, 0, 0, 0));
+        header.setPadding(dp(10), dp(7), dp(10), dp(7));
+        header.setBackground(roundedDrawable(Color.argb(166, 9, 14, 18), Color.TRANSPARENT, 0, 10));
 
         LinearLayout titleBox = new LinearLayout(this);
         titleBox.setOrientation(LinearLayout.VERTICAL);
@@ -154,14 +156,14 @@ public class MainActivity extends ComponentActivity {
 
         TextView title = new TextView(this);
         title.setText("자체감정 사진");
-        title.setTextSize(22);
+        title.setTextSize(18);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(Color.WHITE);
         titleBox.addView(title);
 
         statusText = new TextView(this);
         statusText.setText("카메라 화면에서 대상과 기호를 선택하세요.");
-        statusText.setTextSize(13);
+        statusText.setTextSize(11);
         statusText.setTextColor(Color.rgb(220, 226, 230));
         titleBox.addView(statusText);
 
@@ -190,6 +192,8 @@ public class MainActivity extends ComponentActivity {
         addressInput.setHint("물건지 주소");
         addressInput.setText(propertyAddress);
         addressInput.setTextSize(13);
+        addressInput.setPadding(dp(10), 0, dp(10), 0);
+        addressInput.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
         addressInput.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {
@@ -207,7 +211,7 @@ public class MainActivity extends ComponentActivity {
         });
         controlsPanel.addView(addressInput, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)));
 
-        RadioGroup categoryGroup = new RadioGroup(this);
+        categoryGroup = new RadioGroup(this);
         categoryGroup.setOrientation(RadioGroup.HORIZONTAL);
         categoryGroup.setGravity(Gravity.CENTER);
         categoryGroup.setPadding(0, dp(6), 0, 0);
@@ -218,19 +222,23 @@ public class MainActivity extends ComponentActivity {
             RadioButton checked = findViewById(checkedId);
             if (checked == null) return;
             currentCategory = String.valueOf(checked.getTag());
+            updateCategoryStyles();
             updateSymbolControls();
         });
         controlsPanel.addView(categoryGroup);
+        updateCategoryStyles();
 
         LinearLayout symbolRow = new LinearLayout(this);
         symbolRow.setOrientation(LinearLayout.HORIZONTAL);
         symbolRow.setPadding(0, dp(7), 0, 0);
 
         symbolSpinner = new Spinner(this);
+        symbolSpinner.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
         symbolRow.addView(symbolSpinner, new LinearLayout.LayoutParams(0, dp(40), 1));
 
         buildingSubSpinner = new Spinner(this);
         buildingSubSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, BUILDING_SUB_SYMBOLS));
+        buildingSubSpinner.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
         LinearLayout.LayoutParams subParams = new LinearLayout.LayoutParams(dp(92), dp(40));
         subParams.leftMargin = dp(8);
         symbolRow.addView(buildingSubSpinner, subParams);
@@ -240,6 +248,8 @@ public class MainActivity extends ComponentActivity {
         memoInput.setSingleLine(true);
         memoInput.setHint("사진 설명: 전경, 진입로, 외벽, 내부");
         memoInput.setTextSize(13);
+        memoInput.setPadding(dp(10), 0, dp(10), 0);
+        memoInput.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
         LinearLayout.LayoutParams memoParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40));
         memoParams.topMargin = dp(7);
         controlsPanel.addView(memoInput, memoParams);
@@ -300,6 +310,7 @@ public class MainActivity extends ComponentActivity {
         radio.setTypeface(Typeface.DEFAULT_BOLD);
         radio.setGravity(Gravity.CENTER);
         radio.setChecked(checked);
+        radio.setButtonDrawable(null);
         radio.setPadding(dp(6), 0, dp(6), 0);
         return radio;
     }
@@ -321,7 +332,8 @@ public class MainActivity extends ComponentActivity {
         button.setTextColor(Color.WHITE);
         button.setTypeface(Typeface.DEFAULT_BOLD);
         button.setTextSize(13);
-        button.setBackgroundColor(Color.rgb(22, 108, 125));
+        button.setAllCaps(false);
+        button.setBackground(roundedDrawable(Color.rgb(17, 103, 121), Color.rgb(13, 85, 100), 1, 8));
         return button;
     }
 
@@ -331,6 +343,8 @@ public class MainActivity extends ComponentActivity {
         button.setTypeface(Typeface.DEFAULT_BOLD);
         button.setTextSize(13);
         button.setTextColor(Color.rgb(21, 23, 26));
+        button.setAllCaps(false);
+        button.setBackground(roundedDrawable(Color.rgb(245, 247, 249), Color.rgb(213, 220, 228), 1, 8));
         return button;
     }
 
@@ -340,6 +354,25 @@ public class MainActivity extends ComponentActivity {
         button.setMinWidth(dp(58));
         button.setMinHeight(dp(34));
         return button;
+    }
+
+    private void updateCategoryStyles() {
+        if (categoryGroup == null) return;
+
+        for (int i = 0; i < categoryGroup.getChildCount(); i++) {
+            View child = categoryGroup.getChildAt(i);
+            if (!(child instanceof RadioButton)) continue;
+
+            RadioButton radio = (RadioButton) child;
+            boolean selected = radio.isChecked();
+            radio.setTextColor(selected ? Color.WHITE : Color.rgb(71, 80, 91));
+            radio.setBackground(roundedDrawable(
+                    selected ? Color.rgb(17, 103, 121) : Color.rgb(247, 249, 251),
+                    selected ? Color.rgb(17, 103, 121) : Color.rgb(213, 220, 228),
+                    1,
+                    8
+            ));
+        }
     }
 
     private void showGuideSettingsDialog() {
@@ -424,7 +457,7 @@ public class MainActivity extends ComponentActivity {
         if (controlsPanel == null) return;
 
         int alpha = Math.round(255 * (guideAlphaPercent / 100f));
-        controlsPanel.setBackgroundColor(Color.argb(alpha, 255, 255, 255));
+        controlsPanel.setBackground(roundedDrawable(Color.argb(alpha, 255, 255, 255), Color.argb(120, 204, 212, 222), 1, 12));
         float scale = guideScalePercent / 100f;
         controlsPanel.post(() -> {
             controlsPanel.setPivotX(controlsPanel.getWidth() / 2f);
@@ -432,6 +465,16 @@ public class MainActivity extends ComponentActivity {
             controlsPanel.setScaleX(scale);
             controlsPanel.setScaleY(scale);
         });
+    }
+
+    private GradientDrawable roundedDrawable(int color, int strokeColor, int strokeDp, int radiusDp) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(dp(radiusDp));
+        if (strokeDp > 0) {
+            drawable.setStroke(dp(strokeDp), strokeColor);
+        }
+        return drawable;
     }
 
     private void updateSymbolControls() {
