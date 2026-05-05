@@ -31,7 +31,16 @@
 
 ## Android Studio 없이 APK 받기
 
-GitHub에 이 프로젝트를 올리면 `.github/workflows/build-android-apk.yml` 워크플로우가 APK를 자동으로 만듭니다.
+GitHub에 이 프로젝트를 올리면 APK가 자동으로 만들어집니다.
+
+### 가장 쉬운 방법: Releases에서 직접 받기
+
+1. GitHub 저장소의 `Releases`를 엽니다.
+2. 최신 `Appraisal Camera APK` 항목을 엽니다.
+3. `appraisalcamera.apk`를 휴대폰에서 내려받습니다.
+4. 내려받은 APK를 눌러 설치합니다.
+
+### Actions Artifact로 받기
 
 1. GitHub 저장소에 프로젝트를 업로드합니다.
 2. GitHub 저장소의 `Actions` 탭을 엽니다.
