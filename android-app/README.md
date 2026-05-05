@@ -39,7 +39,7 @@ GitHub에 이 프로젝트를 올리면 APK가 자동으로 만들어집니다.
 
 1. GitHub 저장소의 `Releases`를 엽니다.
 2. 최신 `Appraisal Camera APK` 항목을 엽니다.
-3. `appraisalcamera.apk`를 휴대폰에서 내려받습니다.
+3. `appraisalcamera-camera-screen.apk`를 휴대폰에서 내려받습니다.
 4. 내려받은 APK를 눌러 설치합니다.
 
 ### Actions Artifact로 받기
