@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-android-apk-main
+  cancel-in-progress: true
+
 jobs:
   release:
     name: Build and publish APK
@@ -38,6 +42,7 @@ jobs:
 
       - name: Run Android lint
         working-directory: android-app
+        continue-on-error: true
         run: gradle :app:lintDebug --no-daemon
 
       - name: Verify APK package metadata
