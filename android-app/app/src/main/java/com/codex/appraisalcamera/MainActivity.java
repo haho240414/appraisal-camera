@@ -409,11 +409,12 @@ public class MainActivity extends ComponentActivity {
 
         if (requestCode == REQUEST_PICK_IMAGE && resultCode == RESULT_OK && data != null && data.getData() != null) {
             Uri uri = data.getData();
-            int flags = data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
-            try {
-                getContentResolver().takePersistableUriPermission(uri, flags);
-            } catch (SecurityException ignored) {
-                // Some gallery apps return temporary access only.
+            if ((data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
+                try {
+                    getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (SecurityException ignored) {
+                    // Some gallery apps return temporary access only.
+                }
             }
             addPhoto(uri.toString());
             return;
