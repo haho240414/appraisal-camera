@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>자체감정 사진 출력자료</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="camera-pane" aria-label="사진 촬영">
+        <header class="topbar">
+          <div>
+            <h1>자체감정 사진</h1>
+            <p id="statusText">카메라를 준비하고 있습니다.</p>
+          </div>
+          <button class="icon-button" id="printButton" type="button" title="출력자료 인쇄">
+            <span aria-hidden="true">⎙</span>
+            <span class="sr-only">출력자료 인쇄</span>
+          </button>
+        </header>
+
+        <div class="camera-frame">
+          <video id="cameraVideo" autoplay playsinline muted></video>
+          <canvas id="captureCanvas" hidden></canvas>
+          <div class="camera-empty" id="cameraEmpty">
+            <strong>카메라 권한을 허용해 주세요.</strong>
+            <span>브라우저에서 카메라가 막히면 아래 이미지 선택으로도 등록할 수 있습니다.</span>
+          </div>
+        </div>
+
+        <div class="capture-panel">
+          <fieldset class="category-tabs">
+            <legend>대상 종류</legend>
+            <label>
+              <input type="radio" name="category" value="land" checked />
+              <span>토지</span>
+            </label>
+            <label>
+              <input type="radio" name="category" value="building" />
+              <span>건물</span>
+            </label>
+            <label>
+              <input type="radio" name="category" value="extra" />
+              <span>제시외</span>
+            </label>
+          </fieldset>
+
+          <div class="symbol-row">
+            <label class="field">
+              <span>기호 지정</span>
+              <select id="symbolSelect"></select>
+            </label>
+            <label class="field building-subfield" id="buildingSubfield">
+              <span>건물 세부</span>
+              <select id="buildingSubSelect">
+                <option value="">없음</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="field memo-field">
+            <span>사진 메모</span>
+            <input id="memoInput" type="text" placeholder="예: 전경, 진입로, 외벽, 내부" />
+          </label>
+
+          <div class="button-row">
+            <button class="primary-button" id="captureButton" type="button">촬영 등록</button>
+            <label class="secondary-button" for="fileInput">이미지 선택</label>
+            <input id="fileInput" type="file" accept="image/*" capture="environment" hidden />
+          </div>
+        </div>
+      </section>
+
+      <section class="output-pane" aria-label="출력자료 미리보기">
+        <div class="section-head">
+          <div>
+            <h2>출력자료</h2>
+            <p id="countText">등록된 사진 0장</p>
+          </div>
+          <button id="clearButton" class="ghost-button" type="button">전체 삭제</button>
+        </div>
+
+        <div id="photoList" class="photo-list"></div>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
