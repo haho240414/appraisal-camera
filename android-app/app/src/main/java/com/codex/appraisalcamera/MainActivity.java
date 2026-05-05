@@ -39,6 +39,7 @@ import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -77,6 +78,8 @@ public class MainActivity extends ComponentActivity {
     private static final String PREFS = "appraisal_photos";
     private static final String PREF_PHOTOS = "photos";
     private static final String PREF_ADDRESS = "property_address";
+    private static final String PREF_GUIDE_ALPHA = "guide_alpha_percent";
+    private static final String PREF_GUIDE_SCALE = "guide_scale_percent";
 
     private static final String CATEGORY_LAND = "land";
     private static final String CATEGORY_BUILDING = "building";
@@ -92,6 +95,7 @@ public class MainActivity extends ComponentActivity {
     private LinearLayout listContainer;
     private TextView statusText;
     private TextView countText;
+    private LinearLayout controlsPanel;
     private Spinner symbolSpinner;
     private Spinner buildingSubSpinner;
     private EditText addressInput;
@@ -100,6 +104,8 @@ public class MainActivity extends ComponentActivity {
     private ImageCapture imageCapture;
     private String currentCategory = CATEGORY_LAND;
     private String propertyAddress = "";
+    private int guideAlphaPercent = 82;
+    private int guideScalePercent = 86;
     private WebView printWebView;
     private byte[] pendingPptxBytes;
 
@@ -108,6 +114,7 @@ public class MainActivity extends ComponentActivity {
         super.onCreate(savedInstanceState);
         loadPhotos();
         loadPropertyAddress();
+        loadGuideSettings();
         buildUi();
         updateSymbolControls();
         renderPhotos();
@@ -165,21 +172,24 @@ public class MainActivity extends ComponentActivity {
         Button pptxButton = smallButton("PPTX");
         pptxButton.setOnClickListener(v -> exportPptx());
         header.addView(pptxButton);
+
+        Button settingsButton = smallButton("설정");
+        settingsButton.setOnClickListener(v -> showGuideSettingsDialog());
+        header.addView(settingsButton);
         overlay.addView(header);
 
         View spacer = new View(this);
         overlay.addView(spacer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
 
-        LinearLayout controls = new LinearLayout(this);
-        controls.setOrientation(LinearLayout.VERTICAL);
-        controls.setPadding(dp(14), dp(14), dp(14), dp(14));
-        controls.setBackgroundColor(Color.argb(232, 255, 255, 255));
+        controlsPanel = new LinearLayout(this);
+        controlsPanel.setOrientation(LinearLayout.VERTICAL);
+        controlsPanel.setPadding(dp(10), dp(9), dp(10), dp(9));
 
         addressInput = new EditText(this);
         addressInput.setSingleLine(true);
         addressInput.setHint("물건지 주소");
         addressInput.setText(propertyAddress);
-        addressInput.setTextSize(14);
+        addressInput.setTextSize(13);
         addressInput.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {
@@ -195,12 +205,12 @@ public class MainActivity extends ComponentActivity {
             public void afterTextChanged(Editable s) {
             }
         });
-        controls.addView(addressInput, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
+        controlsPanel.addView(addressInput, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)));
 
         RadioGroup categoryGroup = new RadioGroup(this);
         categoryGroup.setOrientation(RadioGroup.HORIZONTAL);
         categoryGroup.setGravity(Gravity.CENTER);
-        categoryGroup.setPadding(0, dp(10), 0, 0);
+        categoryGroup.setPadding(0, dp(6), 0, 0);
         categoryGroup.addView(categoryRadio("토지", CATEGORY_LAND, true), equalRadioParams());
         categoryGroup.addView(categoryRadio("건물", CATEGORY_BUILDING, false), equalRadioParams());
         categoryGroup.addView(categoryRadio("제시외", CATEGORY_EXTRA, false), equalRadioParams());
@@ -210,52 +220,52 @@ public class MainActivity extends ComponentActivity {
             currentCategory = String.valueOf(checked.getTag());
             updateSymbolControls();
         });
-        controls.addView(categoryGroup);
+        controlsPanel.addView(categoryGroup);
 
         LinearLayout symbolRow = new LinearLayout(this);
         symbolRow.setOrientation(LinearLayout.HORIZONTAL);
-        symbolRow.setPadding(0, dp(12), 0, 0);
+        symbolRow.setPadding(0, dp(7), 0, 0);
 
         symbolSpinner = new Spinner(this);
-        symbolRow.addView(symbolSpinner, new LinearLayout.LayoutParams(0, dp(48), 1));
+        symbolRow.addView(symbolSpinner, new LinearLayout.LayoutParams(0, dp(40), 1));
 
         buildingSubSpinner = new Spinner(this);
         buildingSubSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, BUILDING_SUB_SYMBOLS));
-        LinearLayout.LayoutParams subParams = new LinearLayout.LayoutParams(dp(108), dp(48));
+        LinearLayout.LayoutParams subParams = new LinearLayout.LayoutParams(dp(92), dp(40));
         subParams.leftMargin = dp(8);
         symbolRow.addView(buildingSubSpinner, subParams);
-        controls.addView(symbolRow);
+        controlsPanel.addView(symbolRow);
 
         memoInput = new EditText(this);
         memoInput.setSingleLine(true);
         memoInput.setHint("사진 설명: 전경, 진입로, 외벽, 내부");
-        memoInput.setTextSize(14);
-        LinearLayout.LayoutParams memoParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
-        memoParams.topMargin = dp(10);
-        controls.addView(memoInput, memoParams);
+        memoInput.setTextSize(13);
+        LinearLayout.LayoutParams memoParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40));
+        memoParams.topMargin = dp(7);
+        controlsPanel.addView(memoInput, memoParams);
 
         LinearLayout buttonRow = new LinearLayout(this);
         buttonRow.setOrientation(LinearLayout.HORIZONTAL);
-        buttonRow.setPadding(0, dp(12), 0, 0);
+        buttonRow.setPadding(0, dp(7), 0, 0);
 
         Button cameraButton = primaryButton("촬영");
         cameraButton.setOnClickListener(v -> capturePhoto());
-        buttonRow.addView(cameraButton, new LinearLayout.LayoutParams(0, dp(48), 1));
+        buttonRow.addView(cameraButton, new LinearLayout.LayoutParams(0, dp(40), 1));
 
         Button pickButton = secondaryButton("이미지 선택");
         pickButton.setOnClickListener(v -> pickImage());
-        LinearLayout.LayoutParams pickParams = new LinearLayout.LayoutParams(0, dp(48), 1);
+        LinearLayout.LayoutParams pickParams = new LinearLayout.LayoutParams(0, dp(40), 1);
         pickParams.leftMargin = dp(8);
         buttonRow.addView(pickButton, pickParams);
-        controls.addView(buttonRow);
+        controlsPanel.addView(buttonRow);
 
         LinearLayout outputRow = new LinearLayout(this);
         outputRow.setOrientation(LinearLayout.HORIZONTAL);
         outputRow.setGravity(Gravity.CENTER_VERTICAL);
-        outputRow.setPadding(0, dp(10), 0, 0);
+        outputRow.setPadding(0, dp(6), 0, 0);
 
         countText = new TextView(this);
-        countText.setTextSize(13);
+        countText.setTextSize(12);
         countText.setTextColor(Color.rgb(104, 112, 125));
         outputRow.addView(countText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
@@ -267,12 +277,16 @@ public class MainActivity extends ComponentActivity {
         clearButton.setTextColor(Color.rgb(163, 69, 29));
         clearButton.setOnClickListener(v -> confirmClear());
         outputRow.addView(clearButton);
-        controls.addView(outputRow);
+        controlsPanel.addView(outputRow);
 
         listContainer = new LinearLayout(this);
         listContainer.setOrientation(LinearLayout.VERTICAL);
         listContainer.setPadding(dp(12), 0, dp(12), dp(20));
-        overlay.addView(controls);
+        int guideWidth = Math.min(getResources().getDisplayMetrics().widthPixels - dp(24), dp(390));
+        LinearLayout.LayoutParams guideParams = new LinearLayout.LayoutParams(guideWidth, ViewGroup.LayoutParams.WRAP_CONTENT);
+        guideParams.gravity = Gravity.CENTER_HORIZONTAL;
+        overlay.addView(controlsPanel, guideParams);
+        applyGuideAppearance();
 
         setContentView(root);
     }
@@ -282,7 +296,7 @@ public class MainActivity extends ComponentActivity {
         radio.setId(View.generateViewId());
         radio.setText(label);
         radio.setTag(category);
-        radio.setTextSize(15);
+        radio.setTextSize(13);
         radio.setTypeface(Typeface.DEFAULT_BOLD);
         radio.setGravity(Gravity.CENTER);
         radio.setChecked(checked);
@@ -291,7 +305,7 @@ public class MainActivity extends ComponentActivity {
     }
 
     private LinearLayout.LayoutParams equalRadioParams() {
-        return new LinearLayout.LayoutParams(0, dp(46), 1);
+        return new LinearLayout.LayoutParams(0, dp(38), 1);
     }
 
     private LinearLayout panel() {
@@ -306,6 +320,7 @@ public class MainActivity extends ComponentActivity {
         button.setText(text);
         button.setTextColor(Color.WHITE);
         button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setTextSize(13);
         button.setBackgroundColor(Color.rgb(22, 108, 125));
         return button;
     }
@@ -314,16 +329,109 @@ public class MainActivity extends ComponentActivity {
         Button button = new Button(this);
         button.setText(text);
         button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setTextSize(13);
         button.setTextColor(Color.rgb(21, 23, 26));
         return button;
     }
 
     private Button smallButton(String text) {
         Button button = secondaryButton(text);
-        button.setTextSize(13);
-        button.setMinWidth(dp(74));
-        button.setMinHeight(dp(40));
+        button.setTextSize(12);
+        button.setMinWidth(dp(58));
+        button.setMinHeight(dp(34));
         return button;
+    }
+
+    private void showGuideSettingsDialog() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(18), dp(12), dp(18), 0);
+
+        TextView alphaLabel = settingLabel("배경 불투명도 " + guideAlphaPercent + "%");
+        content.addView(alphaLabel);
+        SeekBar alphaSeek = new SeekBar(this);
+        alphaSeek.setMax(65);
+        alphaSeek.setProgress(guideAlphaPercent - 35);
+        alphaSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                guideAlphaPercent = 35 + progress;
+                alphaLabel.setText("배경 불투명도 " + guideAlphaPercent + "%");
+                saveGuideSettings();
+                applyGuideAppearance();
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+            }
+        });
+        content.addView(alphaSeek);
+
+        TextView scaleLabel = settingLabel("가이드 크기 " + guideScalePercent + "%");
+        LinearLayout.LayoutParams scaleLabelParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        scaleLabelParams.topMargin = dp(12);
+        content.addView(scaleLabel, scaleLabelParams);
+
+        SeekBar scaleSeek = new SeekBar(this);
+        scaleSeek.setMax(40);
+        scaleSeek.setProgress(guideScalePercent - 60);
+        scaleSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                guideScalePercent = 60 + progress;
+                scaleLabel.setText("가이드 크기 " + guideScalePercent + "%");
+                saveGuideSettings();
+                applyGuideAppearance();
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+            }
+        });
+        content.addView(scaleSeek);
+
+        new AlertDialog.Builder(this)
+                .setTitle("가이드 설정")
+                .setView(content)
+                .setNegativeButton("기본값", (dialog, which) -> {
+                    guideAlphaPercent = 82;
+                    guideScalePercent = 86;
+                    saveGuideSettings();
+                    applyGuideAppearance();
+                })
+                .setPositiveButton("닫기", null)
+                .show();
+    }
+
+    private TextView settingLabel(String text) {
+        TextView label = new TextView(this);
+        label.setText(text);
+        label.setTextSize(14);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setTextColor(Color.rgb(21, 23, 26));
+        return label;
+    }
+
+    private void applyGuideAppearance() {
+        if (controlsPanel == null) return;
+
+        int alpha = Math.round(255 * (guideAlphaPercent / 100f));
+        controlsPanel.setBackgroundColor(Color.argb(alpha, 255, 255, 255));
+        float scale = guideScalePercent / 100f;
+        controlsPanel.post(() -> {
+            controlsPanel.setPivotX(controlsPanel.getWidth() / 2f);
+            controlsPanel.setPivotY(controlsPanel.getHeight());
+            controlsPanel.setScaleX(scale);
+            controlsPanel.setScaleY(scale);
+        });
     }
 
     private void updateSymbolControls() {
@@ -972,6 +1080,20 @@ public class MainActivity extends ComponentActivity {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_ADDRESS, propertyAddress).apply();
     }
 
+    private void loadGuideSettings() {
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        guideAlphaPercent = clamp(prefs.getInt(PREF_GUIDE_ALPHA, 82), 35, 100);
+        guideScalePercent = clamp(prefs.getInt(PREF_GUIDE_SCALE, 86), 60, 100);
+    }
+
+    private void saveGuideSettings() {
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit()
+                .putInt(PREF_GUIDE_ALPHA, guideAlphaPercent)
+                .putInt(PREF_GUIDE_SCALE, guideScalePercent)
+                .apply();
+    }
+
     private void savePhotos() {
         JSONArray array = new JSONArray();
         for (PhotoItem item : photos) {
@@ -1035,6 +1157,10 @@ public class MainActivity extends ComponentActivity {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private static class NextSymbol {

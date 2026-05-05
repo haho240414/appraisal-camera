@@ -74,9 +74,13 @@
 
       .panel {
         position: absolute;
-        inset: auto 12px 12px;
-        padding: 14px;
-        background: rgba(255, 255, 255, 0.92);
+        inset: auto auto 12px;
+        width: min(390px, calc(100% - 24px));
+        left: 50%;
+        transform: translateX(-50%) scale(0.86);
+        transform-origin: bottom center;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.82);
       }
 
       .tabs {
@@ -178,6 +182,7 @@
         </div>
         <button>인쇄</button>
         <button>PPTX</button>
+        <button>설정</button>
       </div>
 
       <div class="hint">실제 앱에서는 이 영역에 갤럭시 카메라 화면이 바로 표시됩니다.</div>
