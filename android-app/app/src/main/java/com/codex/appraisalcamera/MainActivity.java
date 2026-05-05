@@ -18,7 +18,6 @@ import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
 import android.text.Editable;
 import android.text.TextWatcher;
-import android.util.Size;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -119,7 +118,7 @@ public class MainActivity extends ComponentActivity {
         root.setBackgroundColor(Color.BLACK);
 
         previewView = new PreviewView(this);
-        previewView.setScaleType(PreviewView.ScaleType.FILL_CENTER);
+        previewView.setScaleType(PreviewView.ScaleType.FIT_CENTER);
         root.addView(previewView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         LinearLayout overlay = new LinearLayout(this);
@@ -198,6 +197,7 @@ public class MainActivity extends ComponentActivity {
         categoryGroup.addView(categoryRadio("제시외", CATEGORY_EXTRA, false), equalRadioParams());
         categoryGroup.setOnCheckedChangeListener((group, checkedId) -> {
             RadioButton checked = findViewById(checkedId);
+            if (checked == null) return;
             currentCategory = String.valueOf(checked.getTag());
             updateSymbolControls();
         });
@@ -270,6 +270,7 @@ public class MainActivity extends ComponentActivity {
 
     private RadioButton categoryRadio(String label, String category, boolean checked) {
         RadioButton radio = new RadioButton(this);
+        radio.setId(View.generateViewId());
         radio.setText(label);
         radio.setTag(category);
         radio.setTextSize(15);
@@ -381,12 +382,9 @@ public class MainActivity extends ComponentActivity {
         providerFuture.addListener(() -> {
             try {
                 ProcessCameraProvider provider = providerFuture.get();
-                Preview preview = new Preview.Builder()
-                        .setTargetResolution(new Size(1280, 720))
-                        .build();
+                Preview preview = new Preview.Builder().build();
                 imageCapture = new ImageCapture.Builder()
                         .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                        .setTargetResolution(new Size(1600, 1200))
                         .build();
                 preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
@@ -800,7 +798,7 @@ public class MainActivity extends ComponentActivity {
             if (i + 1 < sorted.size()) {
                 appendPrintCard(html, sorted.get(i + 1), false);
             }
-            html.append("<div class='office'>사진자료</div>");
+            html.append("<div class='office'>Page : ").append((i / 2) + 1).append("</div>");
             html.append("</section>");
         }
 

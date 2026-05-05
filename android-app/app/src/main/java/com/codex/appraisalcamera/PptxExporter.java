@@ -3,6 +3,12 @@ package com.codex.appraisalcamera;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.media.ExifInterface;
 import android.net.Uri;
 
 import java.io.ByteArrayOutputStream;
@@ -22,6 +28,8 @@ final class PptxExporter {
     private static final long PHOTO_H = emu(252.28);
     private static final long TOP_PHOTO_Y = emu(842.25 - 416.86 - 252.28);
     private static final long BOTTOM_PHOTO_Y = emu(842.25 - 117.05 - 252.28);
+    private static final int NORMALIZED_IMAGE_WIDTH = 1429;
+    private static final int NORMALIZED_IMAGE_HEIGHT = 1009;
 
     private PptxExporter() {
     }
@@ -93,13 +101,71 @@ final class PptxExporter {
         if (bitmap == null) {
             throw new IOException("Cannot decode image");
         }
-        photo.imageWidth = bitmap.getWidth();
-        photo.imageHeight = bitmap.getHeight();
+        Bitmap oriented = rotateBitmap(bitmap, readExifOrientation(context, photo.uri));
+        Bitmap normalized = normalizeBitmap(oriented);
+        photo.imageWidth = normalized.getWidth();
+        photo.imageHeight = normalized.getHeight();
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 88, out);
+        normalized.compress(Bitmap.CompressFormat.JPEG, 88, out);
+        normalized.recycle();
+        if (oriented != bitmap) {
+            oriented.recycle();
+        }
         bitmap.recycle();
         return out.toByteArray();
+    }
+
+    private static int readExifOrientation(Context context, Uri uri) {
+        try (InputStream input = context.getContentResolver().openInputStream(uri)) {
+            if (input == null) {
+                return ExifInterface.ORIENTATION_NORMAL;
+            }
+            ExifInterface exif = new ExifInterface(input);
+            return exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+        } catch (IOException ignored) {
+            return ExifInterface.ORIENTATION_NORMAL;
+        }
+    }
+
+    private static Bitmap rotateBitmap(Bitmap source, int orientation) {
+        int degrees;
+        switch (orientation) {
+            case ExifInterface.ORIENTATION_ROTATE_90:
+                degrees = 90;
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_180:
+                degrees = 180;
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_270:
+                degrees = 270;
+                break;
+            default:
+                return source;
+        }
+
+        Matrix matrix = new Matrix();
+        matrix.postRotate(degrees);
+        return Bitmap.createBitmap(source, 0, 0, source.getWidth(), source.getHeight(), matrix, true);
+    }
+
+    private static Bitmap normalizeBitmap(Bitmap source) {
+        Bitmap output = Bitmap.createBitmap(NORMALIZED_IMAGE_WIDTH, NORMALIZED_IMAGE_HEIGHT, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(output);
+        canvas.drawColor(Color.rgb(245, 245, 245));
+
+        float scale = Math.min(
+                (float) NORMALIZED_IMAGE_WIDTH / source.getWidth(),
+                (float) NORMALIZED_IMAGE_HEIGHT / source.getHeight()
+        );
+        float width = source.getWidth() * scale;
+        float height = source.getHeight() * scale;
+        float left = (NORMALIZED_IMAGE_WIDTH - width) / 2f;
+        float top = (NORMALIZED_IMAGE_HEIGHT - height) / 2f;
+
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+        canvas.drawBitmap(source, null, new RectF(left, top, left + width, top + height), paint);
+        return output;
     }
 
     private static String slideXml(SlideData slide, int pageNumber, String headerText) {
@@ -121,7 +187,7 @@ final class PptxExporter {
             xml.append(stampBox(id++, item.photo.stamp, fit.x + fit.w - emu(116), fit.y + fit.h - emu(24), emu(108), emu(17)));
             xml.append(textShape(id++, item.photo.caption, emu(80), y + PHOTO_H + emu(22), emu(435), emu(25), 1100, false, "ctr"));
         }
-        xml.append(textShape(id, "사진자료", emu(455), emu(805), emu(120), emu(20), 1000, false, "r"));
+        xml.append(textShape(id, "Page : " + pageNumber, emu(455), emu(805), emu(120), emu(20), 1000, false, "r"));
         xml.append("</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>");
         return xml.toString();
     }
