@@ -1,7 +1,6 @@
 package com.codex.appraisalcamera;
 
 import android.Manifest;
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ContentValues;
 import android.content.Intent;
@@ -16,11 +15,11 @@ import android.provider.MediaStore;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
+import android.util.Size;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
-import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -38,18 +37,28 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import androidx.activity.ComponentActivity;
+import androidx.camera.core.CameraSelector;
+import androidx.camera.core.ImageCapture;
+import androidx.camera.core.ImageCaptureException;
+import androidx.camera.core.Preview;
+import androidx.camera.lifecycle.ProcessCameraProvider;
+import androidx.camera.view.PreviewView;
+import androidx.core.content.ContextCompat;
+
+import com.google.common.util.concurrent.ListenableFuture;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 
-public class MainActivity extends Activity {
+public class MainActivity extends ComponentActivity {
     private static final int REQUEST_CAMERA = 1001;
     private static final int REQUEST_PICK_IMAGE = 1002;
     private static final int REQUEST_CREATE_PPTX = 1003;
@@ -74,8 +83,9 @@ public class MainActivity extends Activity {
     private Spinner symbolSpinner;
     private Spinner buildingSubSpinner;
     private EditText memoInput;
+    private PreviewView previewView;
+    private ImageCapture imageCapture;
     private String currentCategory = CATEGORY_LAND;
-    private Uri pendingCameraUri;
     private WebView printWebView;
     private byte[] pendingPptxBytes;
 
@@ -86,6 +96,7 @@ public class MainActivity extends Activity {
         buildUi();
         updateSymbolControls();
         renderPhotos();
+        requestCameraPreview();
     }
 
     private static String[] makeNumberSymbols(int count) {
@@ -97,14 +108,23 @@ public class MainActivity extends Activity {
     }
 
     private void buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(246, 247, 249));
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.BLACK);
+
+        previewView = new PreviewView(this);
+        previewView.setScaleType(PreviewView.ScaleType.FILL_CENTER);
+        root.addView(previewView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        LinearLayout overlay = new LinearLayout(this);
+        overlay.setOrientation(LinearLayout.VERTICAL);
+        overlay.setPadding(dp(12), dp(12), dp(12), dp(12));
+        root.addView(overlay, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(16), dp(14), dp(16), dp(10));
+        header.setPadding(dp(12), dp(10), dp(12), dp(10));
+        header.setBackgroundColor(Color.argb(168, 0, 0, 0));
 
         LinearLayout titleBox = new LinearLayout(this);
         titleBox.setOrientation(LinearLayout.VERTICAL);
@@ -114,13 +134,13 @@ public class MainActivity extends Activity {
         title.setText("자체감정 사진");
         title.setTextSize(22);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextColor(Color.rgb(21, 23, 26));
+        title.setTextColor(Color.WHITE);
         titleBox.addView(title);
 
         statusText = new TextView(this);
-        statusText.setText("대상 종류와 기호를 선택한 뒤 촬영하세요.");
+        statusText.setText("카메라 화면에서 대상과 기호를 선택하세요.");
         statusText.setTextSize(13);
-        statusText.setTextColor(Color.rgb(104, 112, 125));
+        statusText.setTextColor(Color.rgb(220, 226, 230));
         titleBox.addView(statusText);
 
         Button printButton = smallButton("인쇄");
@@ -130,10 +150,15 @@ public class MainActivity extends Activity {
         Button pptxButton = smallButton("PPTX");
         pptxButton.setOnClickListener(v -> exportPptx());
         header.addView(pptxButton);
-        root.addView(header);
+        overlay.addView(header);
 
-        LinearLayout controls = panel();
+        View spacer = new View(this);
+        overlay.addView(spacer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.VERTICAL);
         controls.setPadding(dp(14), dp(14), dp(14), dp(14));
+        controls.setBackgroundColor(Color.argb(232, 255, 255, 255));
 
         RadioGroup categoryGroup = new RadioGroup(this);
         categoryGroup.setOrientation(RadioGroup.HORIZONTAL);
@@ -164,7 +189,7 @@ public class MainActivity extends Activity {
 
         memoInput = new EditText(this);
         memoInput.setSingleLine(true);
-        memoInput.setHint("사진 메모: 전경, 진입로, 외벽, 내부");
+        memoInput.setHint("사진 설명: 전경, 진입로, 외벽, 내부");
         memoInput.setTextSize(14);
         LinearLayout.LayoutParams memoParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
         memoParams.topMargin = dp(10);
@@ -174,8 +199,8 @@ public class MainActivity extends Activity {
         buttonRow.setOrientation(LinearLayout.HORIZONTAL);
         buttonRow.setPadding(0, dp(12), 0, 0);
 
-        Button cameraButton = primaryButton("촬영 등록");
-        cameraButton.setOnClickListener(v -> requestCameraThenCapture());
+        Button cameraButton = primaryButton("촬영");
+        cameraButton.setOnClickListener(v -> capturePhoto());
         buttonRow.addView(cameraButton, new LinearLayout.LayoutParams(0, dp(48), 1));
 
         Button pickButton = secondaryButton("이미지 선택");
@@ -185,40 +210,30 @@ public class MainActivity extends Activity {
         buttonRow.addView(pickButton, pickParams);
         controls.addView(buttonRow);
 
-        root.addView(controls);
-
-        LinearLayout outputHeader = new LinearLayout(this);
-        outputHeader.setOrientation(LinearLayout.HORIZONTAL);
-        outputHeader.setGravity(Gravity.CENTER_VERTICAL);
-        outputHeader.setPadding(dp(16), dp(12), dp(16), dp(8));
-
-        LinearLayout outputTitleBox = new LinearLayout(this);
-        outputTitleBox.setOrientation(LinearLayout.VERTICAL);
-        outputHeader.addView(outputTitleBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-
-        TextView outputTitle = new TextView(this);
-        outputTitle.setText("출력자료");
-        outputTitle.setTextSize(19);
-        outputTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        outputTitleBox.addView(outputTitle);
+        LinearLayout outputRow = new LinearLayout(this);
+        outputRow.setOrientation(LinearLayout.HORIZONTAL);
+        outputRow.setGravity(Gravity.CENTER_VERTICAL);
+        outputRow.setPadding(0, dp(10), 0, 0);
 
         countText = new TextView(this);
         countText.setTextSize(13);
         countText.setTextColor(Color.rgb(104, 112, 125));
-        outputTitleBox.addView(countText);
+        outputRow.addView(countText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        Button listButton = smallButton("목록");
+        listButton.setOnClickListener(v -> showPhotoListDialog());
+        outputRow.addView(listButton);
 
         Button clearButton = smallButton("전체 삭제");
         clearButton.setTextColor(Color.rgb(163, 69, 29));
         clearButton.setOnClickListener(v -> confirmClear());
-        outputHeader.addView(clearButton);
-        root.addView(outputHeader);
+        outputRow.addView(clearButton);
+        controls.addView(outputRow);
 
-        ScrollView scrollView = new ScrollView(this);
         listContainer = new LinearLayout(this);
         listContainer.setOrientation(LinearLayout.VERTICAL);
         listContainer.setPadding(dp(12), 0, dp(12), dp(20));
-        scrollView.addView(listContainer);
-        root.addView(scrollView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        overlay.addView(controls);
 
         setContentView(root);
     }
@@ -323,39 +338,49 @@ public class MainActivity extends Activity {
         return new NextSymbol(symbols[symbols.length - 1], "");
     }
 
-    private void requestCameraThenCapture() {
+    private void requestCameraPreview() {
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.CAMERA}, PERMISSION_CAMERA);
             return;
         }
-        launchCamera();
+        startCameraPreview();
     }
 
-    private void launchCamera() {
-        Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-        if (intent.resolveActivity(getPackageManager()) == null) {
-            Toast.makeText(this, "사용 가능한 카메라 앱이 없습니다.", Toast.LENGTH_SHORT).show();
-            return;
-        }
+    private void startCameraPreview() {
+        ListenableFuture<ProcessCameraProvider> providerFuture = ProcessCameraProvider.getInstance(this);
+        providerFuture.addListener(() -> {
+            try {
+                ProcessCameraProvider provider = providerFuture.get();
+                Preview preview = new Preview.Builder()
+                        .setTargetResolution(new Size(1280, 720))
+                        .build();
+                imageCapture = new ImageCapture.Builder()
+                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                        .setTargetResolution(new Size(1600, 1200))
+                        .build();
+                preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
-        pendingCameraUri = createCameraImageUri();
-        if (pendingCameraUri == null) {
-            Toast.makeText(this, "사진 저장 위치를 만들 수 없습니다.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        intent.putExtra(MediaStore.EXTRA_OUTPUT, pendingCameraUri);
-        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        startActivityForResult(intent, REQUEST_CAMERA);
+                provider.unbindAll();
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture);
+                statusText.setText("대상과 기호를 고른 뒤 촬영하세요.");
+            } catch (Exception e) {
+                statusText.setText("카메라를 시작할 수 없습니다.");
+                Toast.makeText(this, "카메라 시작에 실패했습니다.", Toast.LENGTH_SHORT).show();
+            }
+        }, ContextCompat.getMainExecutor(this));
     }
 
     private Uri createCameraImageUri() {
+        return getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cameraContentValues());
+    }
+
+    private ContentValues cameraContentValues() {
         ContentValues values = new ContentValues();
         values.put(MediaStore.Images.Media.DISPLAY_NAME, "appraisal_" + System.currentTimeMillis() + ".jpg");
         values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
         values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/AppraisalCamera");
         values.put(MediaStore.Images.Media.IS_PENDING, 1);
-        return getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+        return values;
     }
 
     private void pickImage() {
@@ -371,7 +396,7 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_CAMERA) {
             if (hasCameraGrant(permissions, grantResults)) {
-                launchCamera();
+                startCameraPreview();
             } else {
                 Toast.makeText(this, "카메라 권한이 필요합니다.", Toast.LENGTH_SHORT).show();
             }
@@ -381,17 +406,6 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-
-        if (requestCode == REQUEST_CAMERA) {
-            if (resultCode == RESULT_OK && pendingCameraUri != null) {
-                markImageReady(pendingCameraUri);
-                addPhoto(pendingCameraUri.toString());
-            } else if (pendingCameraUri != null) {
-                getContentResolver().delete(pendingCameraUri, null, null);
-            }
-            pendingCameraUri = null;
-            return;
-        }
 
         if (requestCode == REQUEST_PICK_IMAGE && resultCode == RESULT_OK && data != null && data.getData() != null) {
             Uri uri = data.getData();
@@ -408,6 +422,38 @@ public class MainActivity extends Activity {
         if (requestCode == REQUEST_CREATE_PPTX && resultCode == RESULT_OK && data != null && data.getData() != null) {
             writePendingPptx(data.getData());
         }
+    }
+
+    private void capturePhoto() {
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.CAMERA}, PERMISSION_CAMERA);
+            return;
+        }
+
+        if (imageCapture == null) {
+            statusText.setText("카메라 준비 중입니다. 잠시 후 다시 촬영하세요.");
+            startCameraPreview();
+            return;
+        }
+
+        ImageCapture.OutputFileOptions options = new ImageCapture.OutputFileOptions.Builder(getContentResolver(), MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cameraContentValues()).build();
+        imageCapture.takePicture(options, ContextCompat.getMainExecutor(this), new ImageCapture.OnImageSavedCallback() {
+            @Override
+            public void onImageSaved(ImageCapture.OutputFileResults outputFileResults) {
+                Uri savedUri = outputFileResults.getSavedUri();
+                if (savedUri == null) {
+                    Toast.makeText(MainActivity.this, "사진 저장 위치를 확인할 수 없습니다.", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                markImageReady(savedUri);
+                addPhoto(savedUri.toString());
+            }
+
+            @Override
+            public void onError(ImageCaptureException exception) {
+                Toast.makeText(MainActivity.this, "촬영 저장에 실패했습니다.", Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     private void markImageReady(Uri uri) {
@@ -476,6 +522,33 @@ public class MainActivity extends Activity {
                 listContainer.addView(photoCard(photo));
             }
         }
+    }
+
+    private void showPhotoListDialog() {
+        LinearLayout dialogList = new LinearLayout(this);
+        dialogList.setOrientation(LinearLayout.VERTICAL);
+        dialogList.setPadding(dp(12), dp(12), dp(12), dp(12));
+
+        if (photos.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setText("등록된 사진이 없습니다.");
+            empty.setGravity(Gravity.CENTER);
+            empty.setTextColor(Color.rgb(104, 112, 125));
+            dialogList.addView(empty, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(140)));
+        } else {
+            for (PhotoItem photo : sortedPhotos()) {
+                dialogList.addView(photoCard(photo));
+            }
+        }
+
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.addView(dialogList);
+
+        new AlertDialog.Builder(this)
+                .setTitle("등록된 사진")
+                .setView(scrollView)
+                .setPositiveButton("닫기", null)
+                .show();
     }
 
     private View photoCard(PhotoItem photo) {
