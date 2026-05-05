@@ -10,13 +10,14 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-android-apk-main
+  group: release-android-apk-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   release:
     name: Build and publish APK
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
