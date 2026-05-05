@@ -1,6 +1,7 @@
 package com.codex.appraisalcamera;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.AlertDialog;
 import android.content.ContentValues;
 import android.content.Intent;
@@ -403,6 +404,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
+    @SuppressLint("WrongConstant")
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
