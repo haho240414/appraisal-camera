@@ -16,6 +16,8 @@ import android.provider.MediaStore;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.Size;
 import android.view.Gravity;
 import android.view.View;
@@ -66,6 +68,7 @@ public class MainActivity extends ComponentActivity {
     private static final int PERMISSION_CAMERA = 2001;
     private static final String PREFS = "appraisal_photos";
     private static final String PREF_PHOTOS = "photos";
+    private static final String PREF_ADDRESS = "property_address";
 
     private static final String CATEGORY_LAND = "land";
     private static final String CATEGORY_BUILDING = "building";
@@ -83,10 +86,12 @@ public class MainActivity extends ComponentActivity {
     private TextView countText;
     private Spinner symbolSpinner;
     private Spinner buildingSubSpinner;
+    private EditText addressInput;
     private EditText memoInput;
     private PreviewView previewView;
     private ImageCapture imageCapture;
     private String currentCategory = CATEGORY_LAND;
+    private String propertyAddress = "";
     private WebView printWebView;
     private byte[] pendingPptxBytes;
 
@@ -94,6 +99,7 @@ public class MainActivity extends ComponentActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         loadPhotos();
+        loadPropertyAddress();
         buildUi();
         updateSymbolControls();
         renderPhotos();
@@ -161,9 +167,32 @@ public class MainActivity extends ComponentActivity {
         controls.setPadding(dp(14), dp(14), dp(14), dp(14));
         controls.setBackgroundColor(Color.argb(232, 255, 255, 255));
 
+        addressInput = new EditText(this);
+        addressInput.setSingleLine(true);
+        addressInput.setHint("물건지 주소");
+        addressInput.setText(propertyAddress);
+        addressInput.setTextSize(14);
+        addressInput.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                propertyAddress = s.toString().trim();
+                savePropertyAddress();
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+            }
+        });
+        controls.addView(addressInput, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
+
         RadioGroup categoryGroup = new RadioGroup(this);
         categoryGroup.setOrientation(RadioGroup.HORIZONTAL);
         categoryGroup.setGravity(Gravity.CENTER);
+        categoryGroup.setPadding(0, dp(10), 0, 0);
         categoryGroup.addView(categoryRadio("토지", CATEGORY_LAND, true), equalRadioParams());
         categoryGroup.addView(categoryRadio("건물", CATEGORY_BUILDING, false), equalRadioParams());
         categoryGroup.addView(categoryRadio("제시외", CATEGORY_EXTRA, false), equalRadioParams());
@@ -563,7 +592,8 @@ public class MainActivity extends ComponentActivity {
         FrameLayout imageFrame = new FrameLayout(this);
 
         ImageView image = new ImageView(this);
-        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        image.setBackgroundColor(Color.rgb(245, 245, 245));
         image.setImageURI(Uri.parse(photo.uri));
         imageFrame.addView(image, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -692,7 +722,7 @@ public class MainActivity extends ComponentActivity {
             public void onPageFinished(WebView view, String url) {
                 PrintManager printManager = (PrintManager) getSystemService(PRINT_SERVICE);
                 PrintDocumentAdapter adapter = view.createPrintDocumentAdapter("자체감정_사진출력자료");
-                printManager.print("자체감정 사진 출력자료", adapter, new PrintAttributes.Builder().build());
+                printManager.print(documentHeaderText() + " 사진 출력자료", adapter, new PrintAttributes.Builder().build());
             }
         });
         printWebView.loadDataWithBaseURL(null, buildPrintHtml(), "text/html", "UTF-8", null);
@@ -713,7 +743,7 @@ public class MainActivity extends ComponentActivity {
                         photoStamp(photo)
                 ));
             }
-            pendingPptxBytes = PptxExporter.create(this, exportPhotos);
+            pendingPptxBytes = PptxExporter.create(this, exportPhotos, documentHeaderText());
         } catch (IOException e) {
             Toast.makeText(this, "PPTX 파일을 만들 수 없습니다.", Toast.LENGTH_LONG).show();
             return;
@@ -753,8 +783,8 @@ public class MainActivity extends ComponentActivity {
         html.append("h1{position:absolute;left:0;right:0;top:22mm;margin:0;text-align:center;font-size:18pt;letter-spacing:6px}");
         html.append(".card{position:absolute;left:31mm;width:128mm;height:68mm;break-inside:avoid}");
         html.append(".card.top{top:56mm}.card.bottom{top:156mm}");
-        html.append(".frame{position:relative;width:100%;height:100%;background:#eee;overflow:hidden}");
-        html.append("img{width:100%;height:100%;object-fit:cover;display:block}");
+        html.append(".frame{position:relative;width:100%;height:100%;background:#f5f5f5;overflow:hidden}");
+        html.append("img{width:100%;height:100%;object-fit:contain;display:block}");
         html.append(".stamp{position:absolute;right:3mm;bottom:3mm;background:rgba(0,0,0,.72);color:#fff;padding:1.5mm 2.2mm;text-align:right;font-size:8.5pt}");
         html.append(".caption{text-align:center;font-size:11pt;margin-top:5mm}");
         html.append(".office{position:absolute;right:0;bottom:0;font-size:10pt}");
@@ -763,14 +793,14 @@ public class MainActivity extends ComponentActivity {
         ArrayList<PhotoItem> sorted = sortedPhotos();
         for (int i = 0; i < sorted.size(); i += 2) {
             html.append("<section class='page'>");
-            html.append("<div class='docno'>자체감정 사진</div>");
+            html.append("<div class='docno'>").append(escapeHtml(documentHeaderText())).append("</div>");
             html.append("<h1>사 진 용 지</h1>");
             html.append("<div class='page-no'>Page : ").append((i / 2) + 1).append("</div>");
             appendPrintCard(html, sorted.get(i), true);
             if (i + 1 < sorted.size()) {
                 appendPrintCard(html, sorted.get(i + 1), false);
             }
-            html.append("<div class='office'>자체감정 사진자료</div>");
+            html.append("<div class='office'>사진자료</div>");
             html.append("</section>");
         }
 
@@ -810,6 +840,14 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
+    private void loadPropertyAddress() {
+        propertyAddress = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_ADDRESS, "");
+    }
+
+    private void savePropertyAddress() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_ADDRESS, propertyAddress).apply();
+    }
+
     private void savePhotos() {
         JSONArray array = new JSONArray();
         for (PhotoItem item : photos) {
@@ -846,6 +884,13 @@ public class MainActivity extends ComponentActivity {
     private String photoCaption(PhotoItem photo) {
         if (!photo.memo.isEmpty()) return photo.memo;
         return categoryLabel(photo.category) + " 기호 " + photo.symbol;
+    }
+
+    private String documentHeaderText() {
+        if (propertyAddress == null || propertyAddress.trim().isEmpty()) {
+            return "자체감정 사진";
+        }
+        return propertyAddress.trim();
     }
 
     private static int indexOf(String[] values, String target) {

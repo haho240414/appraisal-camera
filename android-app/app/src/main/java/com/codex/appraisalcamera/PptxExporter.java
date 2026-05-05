@@ -26,7 +26,7 @@ final class PptxExporter {
     private PptxExporter() {
     }
 
-    static byte[] create(Context context, List<PhotoData> photos) throws IOException {
+    static byte[] create(Context context, List<PhotoData> photos, String headerText) throws IOException {
         ArrayList<SlideData> slides = new ArrayList<>();
         for (int i = 0; i < photos.size(); i += 2) {
             SlideData slide = new SlideData();
@@ -59,20 +59,20 @@ final class PptxExporter {
                     item.relationshipId = "rId" + (slide.imageRels.size() + 2);
                     item.imageName = "image" + imageIndex + ".jpg";
                     slide.imageRels.add(item);
-                    writeBytes(zip, "ppt/media/" + item.imageName, readJpeg(context, item.photo.uri));
+                    writeBytes(zip, "ppt/media/" + item.imageName, readJpeg(context, item.photo));
                     imageIndex++;
                 }
-                write(zip, "ppt/slides/slide" + slideNumber + ".xml", slideXml(slide, slideNumber));
+                write(zip, "ppt/slides/slide" + slideNumber + ".xml", slideXml(slide, slideNumber, headerText));
                 write(zip, "ppt/slides/_rels/slide" + slideNumber + ".xml.rels", slideRels(slide));
             }
         }
         return bytes.toByteArray();
     }
 
-    private static byte[] readJpeg(Context context, Uri uri) throws IOException {
+    private static byte[] readJpeg(Context context, PhotoData photo) throws IOException {
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
-        try (InputStream input = context.getContentResolver().openInputStream(uri)) {
+        try (InputStream input = context.getContentResolver().openInputStream(photo.uri)) {
             if (input == null) throw new IOException("Cannot open image");
             BitmapFactory.decodeStream(input, null, bounds);
         }
@@ -86,13 +86,15 @@ final class PptxExporter {
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sample;
         Bitmap bitmap;
-        try (InputStream input = context.getContentResolver().openInputStream(uri)) {
+        try (InputStream input = context.getContentResolver().openInputStream(photo.uri)) {
             if (input == null) throw new IOException("Cannot open image");
             bitmap = BitmapFactory.decodeStream(input, null, options);
         }
         if (bitmap == null) {
             throw new IOException("Cannot decode image");
         }
+        photo.imageWidth = bitmap.getWidth();
+        photo.imageHeight = bitmap.getHeight();
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         bitmap.compress(Bitmap.CompressFormat.JPEG, 88, out);
@@ -100,26 +102,46 @@ final class PptxExporter {
         return out.toByteArray();
     }
 
-    private static String slideXml(SlideData slide, int pageNumber) {
+    private static String slideXml(SlideData slide, int pageNumber, String headerText) {
         StringBuilder xml = new StringBuilder();
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
         xml.append("<p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">");
         xml.append("<p:cSld><p:spTree>");
         xml.append("<p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>");
-        xml.append(textShape(2, "자체감정 사진", emu(30.35), emu(20), emu(180), emu(24), 1100, false, "l"));
+        xml.append(textShape(2, headerText, emu(30.35), emu(20), emu(300), emu(24), 1100, false, "l"));
         xml.append(textShape(3, "사 진 용 지", emu(0), emu(80), SLIDE_CX, emu(36), 1800, true, "ctr"));
         xml.append(textShape(4, "Page : " + pageNumber, emu(505), emu(132), emu(80), emu(20), 1000, false, "r"));
 
         int id = 5;
         for (SlideItem item : slide.items) {
             long y = item.top ? TOP_PHOTO_Y : BOTTOM_PHOTO_Y;
-            xml.append(picture(id++, item.relationshipId, item.imageName, PHOTO_X, y, PHOTO_W, PHOTO_H));
-            xml.append(stampBox(id++, item.photo.stamp, PHOTO_X + PHOTO_W - emu(116), y + PHOTO_H - emu(24), emu(108), emu(17)));
+            FitRect fit = fitInside(item.photo, PHOTO_X, y, PHOTO_W, PHOTO_H);
+            xml.append(frameRect(id++, PHOTO_X, y, PHOTO_W, PHOTO_H));
+            xml.append(picture(id++, item.relationshipId, item.imageName, fit.x, fit.y, fit.w, fit.h));
+            xml.append(stampBox(id++, item.photo.stamp, fit.x + fit.w - emu(116), fit.y + fit.h - emu(24), emu(108), emu(17)));
             xml.append(textShape(id++, item.photo.caption, emu(80), y + PHOTO_H + emu(22), emu(435), emu(25), 1100, false, "ctr"));
         }
-        xml.append(textShape(id, "자체감정 사진자료", emu(455), emu(805), emu(120), emu(20), 1000, false, "r"));
+        xml.append(textShape(id, "사진자료", emu(455), emu(805), emu(120), emu(20), 1000, false, "r"));
         xml.append("</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>");
         return xml.toString();
+    }
+
+    private static FitRect fitInside(PhotoData photo, long frameX, long frameY, long frameW, long frameH) {
+        if (photo.imageWidth <= 0 || photo.imageHeight <= 0) {
+            return new FitRect(frameX, frameY, frameW, frameH);
+        }
+
+        double scale = Math.min((double) frameW / photo.imageWidth, (double) frameH / photo.imageHeight);
+        long w = Math.round(photo.imageWidth * scale);
+        long h = Math.round(photo.imageHeight * scale);
+        long x = frameX + (frameW - w) / 2;
+        long y = frameY + (frameH - h) / 2;
+        return new FitRect(x, y, w, h);
+    }
+
+    private static String frameRect(int id, long x, long y, long w, long h) {
+        return "<p:sp><p:nvSpPr><p:cNvPr id=\"" + id + "\" name=\"photo-frame\"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>"
+                + "<p:spPr><a:xfrm><a:off x=\"" + x + "\" y=\"" + y + "\"/><a:ext cx=\"" + w + "\" cy=\"" + h + "\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val=\"F5F5F5\"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>";
     }
 
     private static String picture(int id, String relId, String name, long x, long y, long w, long h) {
@@ -272,6 +294,8 @@ final class PptxExporter {
         final Uri uri;
         final String caption;
         final String stamp;
+        int imageWidth;
+        int imageHeight;
 
         PhotoData(Uri uri, String caption, String stamp) {
             this.uri = uri;
@@ -294,6 +318,20 @@ final class PptxExporter {
         SlideItem(PhotoData photo, boolean top) {
             this.photo = photo;
             this.top = top;
+        }
+    }
+
+    private static final class FitRect {
+        final long x;
+        final long y;
+        final long w;
+        final long h;
+
+        FitRect(long x, long y, long w, long h) {
+            this.x = x;
+            this.y = y;
+            this.w = w;
+            this.h = h;
         }
     }
 }
