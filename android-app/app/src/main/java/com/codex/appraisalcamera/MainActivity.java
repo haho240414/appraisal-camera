@@ -139,8 +139,7 @@ public class MainActivity extends ComponentActivity {
         previewView.setScaleType(PreviewView.ScaleType.FIT_CENTER);
         root.addView(previewView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        LinearLayout overlay = new LinearLayout(this);
-        overlay.setOrientation(LinearLayout.VERTICAL);
+        FrameLayout overlay = new FrameLayout(this);
         overlay.setPadding(dp(10), dp(10), dp(10), dp(10));
         root.addView(overlay, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -160,12 +159,9 @@ public class MainActivity extends ComponentActivity {
         Button settingsButton = smallButton("설정");
         settingsButton.setOnClickListener(v -> showGuideSettingsDialog());
         header.addView(settingsButton);
-        LinearLayout.LayoutParams headerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        headerParams.gravity = Gravity.RIGHT;
+        FrameLayout.LayoutParams headerParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        headerParams.gravity = Gravity.TOP | Gravity.RIGHT;
         overlay.addView(header, headerParams);
-
-        View spacer = new View(this);
-        overlay.addView(spacer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
 
         controlsPanel = new LinearLayout(this);
         controlsPanel.setOrientation(LinearLayout.VERTICAL);
@@ -276,13 +272,31 @@ public class MainActivity extends ComponentActivity {
         listContainer = new LinearLayout(this);
         listContainer.setOrientation(LinearLayout.VERTICAL);
         listContainer.setPadding(dp(12), 0, dp(12), dp(20));
-        int guideWidth = Math.min(getResources().getDisplayMetrics().widthPixels - dp(24), dp(360));
-        LinearLayout.LayoutParams guideParams = new LinearLayout.LayoutParams(guideWidth, ViewGroup.LayoutParams.WRAP_CONTENT);
-        guideParams.gravity = Gravity.CENTER_HORIZONTAL;
+        FrameLayout.LayoutParams guideParams = guideLayoutParams();
         overlay.addView(controlsPanel, guideParams);
         applyGuideAppearance();
 
         setContentView(root);
+    }
+
+    private FrameLayout.LayoutParams guideLayoutParams() {
+        int width = getResources().getDisplayMetrics().widthPixels;
+        int height = getResources().getDisplayMetrics().heightPixels;
+        boolean landscape = width > height;
+
+        if (landscape) {
+            int guideWidth = Math.min(Math.max(dp(250), Math.round(width * 0.32f)), dp(320));
+            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(guideWidth, ViewGroup.LayoutParams.WRAP_CONTENT);
+            params.gravity = Gravity.RIGHT | Gravity.CENTER_VERTICAL;
+            params.rightMargin = dp(4);
+            return params;
+        }
+
+        int guideWidth = Math.min(width - dp(24), dp(360));
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(guideWidth, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        params.bottomMargin = dp(4);
+        return params;
     }
 
     private RadioButton categoryRadio(String label, String category, boolean checked) {
