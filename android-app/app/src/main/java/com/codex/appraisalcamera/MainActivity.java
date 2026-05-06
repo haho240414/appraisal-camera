@@ -100,6 +100,7 @@ public class MainActivity extends ComponentActivity {
     private static final String MAIL_APP_NAVER = "naver";
     private static final String GMAIL_PACKAGE = "com.google.android.gm";
     private static final String NAVER_MAIL_PACKAGE = "com.nhn.android.mail";
+    private static final String PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
     private static final String CATEGORY_LAND = "land";
     private static final String CATEGORY_BUILDING = "building";
@@ -1340,6 +1341,7 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void sendPptxEmail(String recipient) {
+        Uri attachmentUri = null;
         try {
             byte[] pptxBytes = createPptxBytes();
             File exportDir = new File(getCacheDir(), "mail_exports");
@@ -1358,26 +1360,48 @@ public class MainActivity extends ComponentActivity {
                 output.write(pptxBytes);
             }
 
-            Uri attachmentUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", pptxFile);
-            Intent emailIntent = new Intent(Intent.ACTION_SEND);
-            emailIntent.setType("application/vnd.openxmlformats-officedocument.presentationml.presentation");
-            emailIntent.putExtra(Intent.EXTRA_EMAIL, new String[]{recipient});
-            emailIntent.putExtra(Intent.EXTRA_SUBJECT, documentHeaderText() + " 사진자료");
-            emailIntent.putExtra(Intent.EXTRA_TEXT, "사진자료 PPTX 파일을 첨부합니다.");
-            emailIntent.putExtra(Intent.EXTRA_STREAM, attachmentUri);
-            emailIntent.setClipData(ClipData.newUri(getContentResolver(), "사진자료 PPTX", attachmentUri));
-            emailIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            attachmentUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", pptxFile);
+            String mailApp = getSavedMailApp();
+            String mimeType = MAIL_APP_NAVER.equals(mailApp) ? "*/*" : PPTX_MIME;
+            Intent emailIntent = createEmailIntent(recipient, attachmentUri, mimeType);
             String mailPackage = selectedMailPackage();
             if (!mailPackage.isEmpty()) {
                 emailIntent.setPackage(mailPackage);
+                grantUriPermission(mailPackage, attachmentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 startActivity(emailIntent);
             } else {
                 startActivity(Intent.createChooser(emailIntent, "메일 앱 선택"));
             }
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(this, "선택한 메일 앱을 찾을 수 없습니다. 설정에서 메일 앱을 변경해주세요.", Toast.LENGTH_LONG).show();
+            openEmailChooserFallback(recipient, attachmentUri);
         } catch (Exception e) {
             Toast.makeText(this, "메일 발송 화면을 열 수 없습니다.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private Intent createEmailIntent(String recipient, Uri attachmentUri, String mimeType) {
+        Intent emailIntent = new Intent(Intent.ACTION_SEND);
+        emailIntent.setType(mimeType);
+        emailIntent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{PPTX_MIME, "application/octet-stream"});
+        emailIntent.putExtra(Intent.EXTRA_EMAIL, new String[]{recipient});
+        emailIntent.putExtra(Intent.EXTRA_SUBJECT, documentHeaderText() + " 사진자료");
+        emailIntent.putExtra(Intent.EXTRA_TEXT, "사진자료 PPTX 파일을 첨부합니다.");
+        emailIntent.putExtra(Intent.EXTRA_STREAM, attachmentUri);
+        emailIntent.setClipData(ClipData.newUri(getContentResolver(), "사진자료 PPTX", attachmentUri));
+        emailIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        return emailIntent;
+    }
+
+    private void openEmailChooserFallback(String recipient, Uri attachmentUri) {
+        if (attachmentUri == null) {
+            Toast.makeText(this, "선택한 메일 앱을 열 수 없습니다. 설정에서 '앱 선택'으로 바꿔 다시 시도해주세요.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            Intent fallbackIntent = createEmailIntent(recipient, attachmentUri, "*/*");
+            startActivity(Intent.createChooser(fallbackIntent, "메일 앱 선택"));
+        } catch (Exception fallbackError) {
+            Toast.makeText(this, "선택한 메일 앱을 열 수 없습니다. 설정에서 '앱 선택'으로 바꿔 다시 시도해주세요.", Toast.LENGTH_LONG).show();
         }
     }
 
