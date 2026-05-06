@@ -142,34 +142,53 @@ public class MainActivity extends ComponentActivity {
 
         boolean portrait = isPortraitLayout();
         LinearLayout header = new LinearLayout(this);
-        header.setOrientation(portrait ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        header.setOrientation(LinearLayout.VERTICAL);
         header.setGravity(Gravity.CENTER);
-        header.setPadding(dp(6), dp(5), dp(6), dp(5));
+        header.setPadding(dp(7), dp(6), dp(7), dp(6));
         header.setBackground(roundedDrawable(Color.argb(166, 9, 14, 18), Color.TRANSPARENT, 0, 10));
 
         statusText = new TextView(this);
         statusText.setVisibility(View.GONE);
 
+        LinearLayout firstToolbarRow = header;
+        LinearLayout secondToolbarRow = null;
+        if (portrait) {
+            firstToolbarRow = toolbarRow();
+            secondToolbarRow = toolbarRow();
+            header.addView(firstToolbarRow);
+            LinearLayout.LayoutParams secondRowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            secondRowParams.topMargin = dp(5);
+            header.addView(secondToolbarRow, secondRowParams);
+        }
+
         Button addressButton = smallButton("주소");
         addressButton.setOnClickListener(v -> showAddressDialog());
-        addToolbarButton(header, addressButton, !portrait);
 
         Button pptxButton = smallButton("PPTX");
         pptxButton.setOnClickListener(v -> exportPptx());
-        addToolbarButton(header, pptxButton, !portrait);
 
         Button listButton = smallButton("목록");
         listButton.setOnClickListener(v -> showPhotoListDialog());
-        addToolbarButton(header, listButton, !portrait);
 
         Button clearButton = smallButton("전체삭제");
         clearButton.setTextColor(Color.rgb(163, 69, 29));
         clearButton.setOnClickListener(v -> confirmClear());
-        addToolbarButton(header, clearButton, !portrait);
 
         Button settingsButton = smallButton("설정");
         settingsButton.setOnClickListener(v -> showGuideSettingsDialog());
-        addToolbarButton(header, settingsButton, !portrait);
+        if (portrait) {
+            addToolbarButton(firstToolbarRow, addressButton, false);
+            addToolbarButton(firstToolbarRow, pptxButton, false);
+            addToolbarButton(firstToolbarRow, listButton, false);
+            addToolbarButton(secondToolbarRow, clearButton, false);
+            addToolbarButton(secondToolbarRow, settingsButton, false);
+        } else {
+            addToolbarButton(header, addressButton, true);
+            addToolbarButton(header, pptxButton, true);
+            addToolbarButton(header, listButton, true);
+            addToolbarButton(header, clearButton, true);
+            addToolbarButton(header, settingsButton, true);
+        }
         overlay.addView(header, toolbarLayoutParams(portrait));
 
         controlsPanel = new LinearLayout(this);
@@ -289,13 +308,20 @@ public class MainActivity extends ComponentActivity {
         return params;
     }
 
+    private LinearLayout toolbarRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+        return row;
+    }
+
     private void addToolbarButton(LinearLayout toolbar, Button button, boolean vertical) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(vertical ? dp(76) : ViewGroup.LayoutParams.WRAP_CONTENT, dp(30));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(vertical ? dp(88) : ViewGroup.LayoutParams.WRAP_CONTENT, dp(34));
         if (toolbar.getChildCount() > 0) {
             if (vertical) {
-                params.topMargin = dp(5);
+                params.topMargin = dp(6);
             } else {
-                params.leftMargin = dp(4);
+                params.leftMargin = dp(6);
             }
         }
         toolbar.addView(button, params);
@@ -350,9 +376,12 @@ public class MainActivity extends ComponentActivity {
 
     private Button smallButton(String text) {
         Button button = secondaryButton(text);
-        button.setTextSize(11);
-        button.setMinWidth(dp(52));
-        button.setMinHeight(dp(30));
+        button.setTextSize(10);
+        button.setSingleLine(true);
+        button.setIncludeFontPadding(false);
+        button.setMinWidth(dp(58));
+        button.setMinHeight(dp(34));
+        button.setPadding(dp(8), 0, dp(8), 0);
         return button;
     }
 

@@ -39,13 +39,13 @@
         position: absolute;
         inset: 10px auto auto 50%;
         display: flex;
-        flex-direction: row;
+        flex-direction: column;
         align-items: center;
-        gap: 6px;
+        gap: 5px;
         justify-content: center;
         width: auto;
         transform: translateX(-50%);
-        padding: 5px 6px;
+        padding: 6px 7px;
         background: rgba(9, 14, 18, 0.65);
         color: #fff;
         border-radius: 10px;
@@ -68,19 +68,27 @@
       }
 
       button {
-        min-height: 30px;
+        min-height: 34px;
         border: 0;
         border-radius: 8px;
         padding: 0 8px;
         background: #f5f7f9;
         color: #15171a;
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 800;
         border: 1px solid #d5dce4;
+        white-space: nowrap;
       }
 
       .topbar button {
-        width: auto;
+        min-width: 58px;
+      }
+
+      .toolbar-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
       }
 
       .panel {
@@ -192,8 +200,12 @@
           transform: translateY(-50%);
         }
 
+        .toolbar-row {
+          flex-direction: column;
+        }
+
         .topbar button {
-          width: 76px;
+          width: 88px;
         }
       }
     </style>
@@ -205,11 +217,15 @@
           <strong>자체감정 사진</strong>
           <span>대상과 기호를 고른 뒤 촬영하세요.</span>
         </div>
-        <button>주소</button>
-        <button>PPTX</button>
-        <button>목록</button>
-        <button class="danger">전체삭제</button>
-        <button>설정</button>
+        <div class="toolbar-row">
+          <button>주소</button>
+          <button>PPTX</button>
+          <button>목록</button>
+        </div>
+        <div class="toolbar-row">
+          <button class="danger">전체삭제</button>
+          <button>설정</button>
+        </div>
       </div>
 
       <div class="hint">실제 앱에서는 이 영역에 갤럭시 카메라 화면이 바로 표시됩니다.</div>
