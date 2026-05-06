@@ -25,8 +25,6 @@ import android.provider.MediaStore;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
-import android.text.Editable;
-import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -100,7 +98,6 @@ public class MainActivity extends ComponentActivity {
     private RadioGroup categoryGroup;
     private Spinner symbolSpinner;
     private Spinner buildingSubSpinner;
-    private EditText addressInput;
     private EditText memoInput;
     private PreviewView previewView;
     private ImageCapture imageCapture;
@@ -143,53 +140,41 @@ public class MainActivity extends ComponentActivity {
         overlay.setPadding(dp(10), dp(10), dp(10), dp(10));
         root.addView(overlay, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        boolean portrait = isPortraitLayout();
         LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        header.setOrientation(portrait ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER);
         header.setPadding(dp(6), dp(5), dp(6), dp(5));
         header.setBackground(roundedDrawable(Color.argb(166, 9, 14, 18), Color.TRANSPARENT, 0, 10));
 
         statusText = new TextView(this);
         statusText.setVisibility(View.GONE);
 
+        Button addressButton = smallButton("주소");
+        addressButton.setOnClickListener(v -> showAddressDialog());
+        addToolbarButton(header, addressButton, portrait);
+
         Button pptxButton = smallButton("PPTX");
         pptxButton.setOnClickListener(v -> exportPptx());
-        header.addView(pptxButton);
+        addToolbarButton(header, pptxButton, portrait);
+
+        Button listButton = smallButton("목록");
+        listButton.setOnClickListener(v -> showPhotoListDialog());
+        addToolbarButton(header, listButton, portrait);
+
+        Button clearButton = smallButton("전체삭제");
+        clearButton.setTextColor(Color.rgb(163, 69, 29));
+        clearButton.setOnClickListener(v -> confirmClear());
+        addToolbarButton(header, clearButton, portrait);
 
         Button settingsButton = smallButton("설정");
         settingsButton.setOnClickListener(v -> showGuideSettingsDialog());
-        header.addView(settingsButton);
-        FrameLayout.LayoutParams headerParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        headerParams.gravity = Gravity.TOP | Gravity.RIGHT;
-        overlay.addView(header, headerParams);
+        addToolbarButton(header, settingsButton, portrait);
+        overlay.addView(header, toolbarLayoutParams(portrait));
 
         controlsPanel = new LinearLayout(this);
         controlsPanel.setOrientation(LinearLayout.VERTICAL);
         controlsPanel.setPadding(dp(8), dp(6), dp(8), dp(6));
-
-        addressInput = new EditText(this);
-        addressInput.setSingleLine(true);
-        addressInput.setHint("물건지 주소");
-        addressInput.setText(propertyAddress);
-        addressInput.setTextSize(13);
-        addressInput.setPadding(dp(10), 0, dp(10), 0);
-        addressInput.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
-        addressInput.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-            }
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-                propertyAddress = s.toString().trim();
-                savePropertyAddress();
-            }
-
-            @Override
-            public void afterTextChanged(Editable s) {
-            }
-        });
-        controlsPanel.addView(addressInput, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)));
 
         categoryGroup = new RadioGroup(this);
         categoryGroup.setOrientation(RadioGroup.HORIZONTAL);
@@ -249,25 +234,13 @@ public class MainActivity extends ComponentActivity {
         buttonRow.addView(pickButton, pickParams);
         controlsPanel.addView(buttonRow);
 
-        LinearLayout outputRow = new LinearLayout(this);
-        outputRow.setOrientation(LinearLayout.HORIZONTAL);
-        outputRow.setGravity(Gravity.CENTER_VERTICAL);
-        outputRow.setPadding(0, dp(4), 0, 0);
-
         countText = new TextView(this);
-        countText.setTextSize(12);
+        countText.setGravity(Gravity.CENTER);
+        countText.setTextSize(11);
         countText.setTextColor(Color.rgb(104, 112, 125));
-        outputRow.addView(countText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-
-        Button listButton = smallButton("목록");
-        listButton.setOnClickListener(v -> showPhotoListDialog());
-        outputRow.addView(listButton);
-
-        Button clearButton = smallButton("전체 삭제");
-        clearButton.setTextColor(Color.rgb(163, 69, 29));
-        clearButton.setOnClickListener(v -> confirmClear());
-        outputRow.addView(clearButton);
-        controlsPanel.addView(outputRow);
+        LinearLayout.LayoutParams countParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        countParams.topMargin = dp(3);
+        controlsPanel.addView(countText, countParams);
 
         listContainer = new LinearLayout(this);
         listContainer.setOrientation(LinearLayout.VERTICAL);
@@ -297,6 +270,33 @@ public class MainActivity extends ComponentActivity {
         params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
         params.bottomMargin = dp(4);
         return params;
+    }
+
+    private boolean isPortraitLayout() {
+        int width = getResources().getDisplayMetrics().widthPixels;
+        int height = getResources().getDisplayMetrics().heightPixels;
+        return height >= width;
+    }
+
+    private FrameLayout.LayoutParams toolbarLayoutParams(boolean portrait) {
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        if (portrait) {
+            params.gravity = Gravity.LEFT | Gravity.CENTER_VERTICAL;
+            params.leftMargin = dp(4);
+        } else {
+            params.gravity = Gravity.TOP | Gravity.RIGHT;
+        }
+        return params;
+    }
+
+    private void addToolbarButton(LinearLayout toolbar, Button button, boolean vertical) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(vertical ? dp(76) : ViewGroup.LayoutParams.WRAP_CONTENT, dp(30));
+        if (vertical) {
+            params.bottomMargin = dp(5);
+        } else {
+            params.leftMargin = dp(4);
+        }
+        toolbar.addView(button, params);
     }
 
     private RadioButton categoryRadio(String label, String category, boolean checked) {
@@ -371,6 +371,28 @@ public class MainActivity extends ComponentActivity {
                     8
             ));
         }
+    }
+
+    private void showAddressDialog() {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("물건지 주소");
+        input.setText(propertyAddress);
+        input.setSelectAllOnFocus(false);
+        input.setTextSize(14);
+        input.setPadding(dp(10), 0, dp(10), 0);
+        input.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
+
+        new AlertDialog.Builder(this)
+                .setTitle("물건지 주소")
+                .setView(input)
+                .setNegativeButton("취소", null)
+                .setPositiveButton("저장", (dialog, which) -> {
+                    propertyAddress = input.getText().toString().trim();
+                    savePropertyAddress();
+                    Toast.makeText(this, "주소가 저장되었습니다.", Toast.LENGTH_SHORT).show();
+                })
+                .show();
     }
 
     private void showGuideSettingsDialog() {
