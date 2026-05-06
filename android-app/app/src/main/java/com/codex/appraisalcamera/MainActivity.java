@@ -107,7 +107,7 @@ public class MainActivity extends ComponentActivity {
     private String currentCategory = CATEGORY_LAND;
     private String propertyAddress = "";
     private int guideAlphaPercent = 82;
-    private int guideScalePercent = 86;
+    private int guideScalePercent = 78;
     private WebView printWebView;
     private byte[] pendingPptxBytes;
 
@@ -146,30 +146,12 @@ public class MainActivity extends ComponentActivity {
 
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(10), dp(7), dp(10), dp(7));
+        header.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(6), dp(5), dp(6), dp(5));
         header.setBackground(roundedDrawable(Color.argb(166, 9, 14, 18), Color.TRANSPARENT, 0, 10));
 
-        LinearLayout titleBox = new LinearLayout(this);
-        titleBox.setOrientation(LinearLayout.VERTICAL);
-        header.addView(titleBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-
-        TextView title = new TextView(this);
-        title.setText("자체감정 사진");
-        title.setTextSize(18);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextColor(Color.WHITE);
-        titleBox.addView(title);
-
         statusText = new TextView(this);
-        statusText.setText("카메라 화면에서 대상과 기호를 선택하세요.");
-        statusText.setTextSize(11);
-        statusText.setTextColor(Color.rgb(220, 226, 230));
-        titleBox.addView(statusText);
-
-        Button printButton = smallButton("인쇄");
-        printButton.setOnClickListener(v -> printOutput());
-        header.addView(printButton);
+        statusText.setVisibility(View.GONE);
 
         Button pptxButton = smallButton("PPTX");
         pptxButton.setOnClickListener(v -> exportPptx());
@@ -178,14 +160,16 @@ public class MainActivity extends ComponentActivity {
         Button settingsButton = smallButton("설정");
         settingsButton.setOnClickListener(v -> showGuideSettingsDialog());
         header.addView(settingsButton);
-        overlay.addView(header);
+        LinearLayout.LayoutParams headerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        headerParams.gravity = Gravity.RIGHT;
+        overlay.addView(header, headerParams);
 
         View spacer = new View(this);
         overlay.addView(spacer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
 
         controlsPanel = new LinearLayout(this);
         controlsPanel.setOrientation(LinearLayout.VERTICAL);
-        controlsPanel.setPadding(dp(10), dp(9), dp(10), dp(9));
+        controlsPanel.setPadding(dp(8), dp(6), dp(8), dp(6));
 
         addressInput = new EditText(this);
         addressInput.setSingleLine(true);
@@ -209,12 +193,12 @@ public class MainActivity extends ComponentActivity {
             public void afterTextChanged(Editable s) {
             }
         });
-        controlsPanel.addView(addressInput, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)));
+        controlsPanel.addView(addressInput, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)));
 
         categoryGroup = new RadioGroup(this);
         categoryGroup.setOrientation(RadioGroup.HORIZONTAL);
         categoryGroup.setGravity(Gravity.CENTER);
-        categoryGroup.setPadding(0, dp(6), 0, 0);
+        categoryGroup.setPadding(0, dp(4), 0, 0);
         categoryGroup.addView(categoryRadio("토지", CATEGORY_LAND, true), equalRadioParams());
         categoryGroup.addView(categoryRadio("건물", CATEGORY_BUILDING, false), equalRadioParams());
         categoryGroup.addView(categoryRadio("제시외", CATEGORY_EXTRA, false), equalRadioParams());
@@ -230,17 +214,17 @@ public class MainActivity extends ComponentActivity {
 
         LinearLayout symbolRow = new LinearLayout(this);
         symbolRow.setOrientation(LinearLayout.HORIZONTAL);
-        symbolRow.setPadding(0, dp(7), 0, 0);
+        symbolRow.setPadding(0, dp(5), 0, 0);
 
         symbolSpinner = new Spinner(this);
         symbolSpinner.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
-        symbolRow.addView(symbolSpinner, new LinearLayout.LayoutParams(0, dp(40), 1));
+        symbolRow.addView(symbolSpinner, new LinearLayout.LayoutParams(0, dp(34), 1));
 
         buildingSubSpinner = new Spinner(this);
         buildingSubSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, BUILDING_SUB_SYMBOLS));
         buildingSubSpinner.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
-        LinearLayout.LayoutParams subParams = new LinearLayout.LayoutParams(dp(92), dp(40));
-        subParams.leftMargin = dp(8);
+        LinearLayout.LayoutParams subParams = new LinearLayout.LayoutParams(dp(82), dp(34));
+        subParams.leftMargin = dp(6);
         symbolRow.addView(buildingSubSpinner, subParams);
         controlsPanel.addView(symbolRow);
 
@@ -250,29 +234,29 @@ public class MainActivity extends ComponentActivity {
         memoInput.setTextSize(13);
         memoInput.setPadding(dp(10), 0, dp(10), 0);
         memoInput.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
-        LinearLayout.LayoutParams memoParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40));
-        memoParams.topMargin = dp(7);
+        LinearLayout.LayoutParams memoParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34));
+        memoParams.topMargin = dp(5);
         controlsPanel.addView(memoInput, memoParams);
 
         LinearLayout buttonRow = new LinearLayout(this);
         buttonRow.setOrientation(LinearLayout.HORIZONTAL);
-        buttonRow.setPadding(0, dp(7), 0, 0);
+        buttonRow.setPadding(0, dp(5), 0, 0);
 
         Button cameraButton = primaryButton("촬영");
         cameraButton.setOnClickListener(v -> capturePhoto());
-        buttonRow.addView(cameraButton, new LinearLayout.LayoutParams(0, dp(40), 1));
+        buttonRow.addView(cameraButton, new LinearLayout.LayoutParams(0, dp(36), 1));
 
         Button pickButton = secondaryButton("이미지 선택");
         pickButton.setOnClickListener(v -> pickImage());
-        LinearLayout.LayoutParams pickParams = new LinearLayout.LayoutParams(0, dp(40), 1);
-        pickParams.leftMargin = dp(8);
+        LinearLayout.LayoutParams pickParams = new LinearLayout.LayoutParams(0, dp(36), 1);
+        pickParams.leftMargin = dp(6);
         buttonRow.addView(pickButton, pickParams);
         controlsPanel.addView(buttonRow);
 
         LinearLayout outputRow = new LinearLayout(this);
         outputRow.setOrientation(LinearLayout.HORIZONTAL);
         outputRow.setGravity(Gravity.CENTER_VERTICAL);
-        outputRow.setPadding(0, dp(6), 0, 0);
+        outputRow.setPadding(0, dp(4), 0, 0);
 
         countText = new TextView(this);
         countText.setTextSize(12);
@@ -292,7 +276,7 @@ public class MainActivity extends ComponentActivity {
         listContainer = new LinearLayout(this);
         listContainer.setOrientation(LinearLayout.VERTICAL);
         listContainer.setPadding(dp(12), 0, dp(12), dp(20));
-        int guideWidth = Math.min(getResources().getDisplayMetrics().widthPixels - dp(24), dp(390));
+        int guideWidth = Math.min(getResources().getDisplayMetrics().widthPixels - dp(24), dp(360));
         LinearLayout.LayoutParams guideParams = new LinearLayout.LayoutParams(guideWidth, ViewGroup.LayoutParams.WRAP_CONTENT);
         guideParams.gravity = Gravity.CENTER_HORIZONTAL;
         overlay.addView(controlsPanel, guideParams);
@@ -306,7 +290,7 @@ public class MainActivity extends ComponentActivity {
         radio.setId(View.generateViewId());
         radio.setText(label);
         radio.setTag(category);
-        radio.setTextSize(13);
+        radio.setTextSize(12);
         radio.setTypeface(Typeface.DEFAULT_BOLD);
         radio.setGravity(Gravity.CENTER);
         radio.setChecked(checked);
@@ -316,7 +300,7 @@ public class MainActivity extends ComponentActivity {
     }
 
     private LinearLayout.LayoutParams equalRadioParams() {
-        return new LinearLayout.LayoutParams(0, dp(38), 1);
+        return new LinearLayout.LayoutParams(0, dp(32), 1);
     }
 
     private LinearLayout panel() {
@@ -331,7 +315,7 @@ public class MainActivity extends ComponentActivity {
         button.setText(text);
         button.setTextColor(Color.WHITE);
         button.setTypeface(Typeface.DEFAULT_BOLD);
-        button.setTextSize(13);
+        button.setTextSize(12);
         button.setAllCaps(false);
         button.setBackground(roundedDrawable(Color.rgb(17, 103, 121), Color.rgb(13, 85, 100), 1, 8));
         return button;
@@ -341,7 +325,7 @@ public class MainActivity extends ComponentActivity {
         Button button = new Button(this);
         button.setText(text);
         button.setTypeface(Typeface.DEFAULT_BOLD);
-        button.setTextSize(13);
+        button.setTextSize(12);
         button.setTextColor(Color.rgb(21, 23, 26));
         button.setAllCaps(false);
         button.setBackground(roundedDrawable(Color.rgb(245, 247, 249), Color.rgb(213, 220, 228), 1, 8));
@@ -350,9 +334,9 @@ public class MainActivity extends ComponentActivity {
 
     private Button smallButton(String text) {
         Button button = secondaryButton(text);
-        button.setTextSize(12);
-        button.setMinWidth(dp(58));
-        button.setMinHeight(dp(34));
+        button.setTextSize(11);
+        button.setMinWidth(dp(52));
+        button.setMinHeight(dp(30));
         return button;
     }
 
@@ -436,7 +420,7 @@ public class MainActivity extends ComponentActivity {
                 .setView(content)
                 .setNegativeButton("기본값", (dialog, which) -> {
                     guideAlphaPercent = 82;
-                    guideScalePercent = 86;
+                    guideScalePercent = 78;
                     saveGuideSettings();
                     applyGuideAppearance();
                 })
@@ -1126,7 +1110,7 @@ public class MainActivity extends ComponentActivity {
     private void loadGuideSettings() {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         guideAlphaPercent = clamp(prefs.getInt(PREF_GUIDE_ALPHA, 82), 35, 100);
-        guideScalePercent = clamp(prefs.getInt(PREF_GUIDE_SCALE, 86), 60, 100);
+        guideScalePercent = clamp(prefs.getInt(PREF_GUIDE_SCALE, 78), 60, 100);
     }
 
     private void saveGuideSettings() {
