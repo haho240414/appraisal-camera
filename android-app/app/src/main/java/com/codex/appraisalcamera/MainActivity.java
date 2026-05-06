@@ -22,6 +22,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.media.ExifInterface;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
@@ -1344,27 +1345,10 @@ public class MainActivity extends ComponentActivity {
         Uri attachmentUri = null;
         try {
             byte[] pptxBytes = createPptxBytes();
-            File exportDir = new File(getCacheDir(), "mail_exports");
-            if (!exportDir.exists() && !exportDir.mkdirs()) {
-                throw new IOException("Cannot create mail export directory");
-            }
-            File[] oldFiles = exportDir.listFiles();
-            if (oldFiles != null) {
-                for (File oldFile : oldFiles) {
-                    oldFile.delete();
-                }
-            }
-
-            File pptxFile = new File(exportDir, pptxFileName());
-            try (FileOutputStream output = new FileOutputStream(pptxFile)) {
-                output.write(pptxBytes);
-            }
-
-            attachmentUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", pptxFile);
             String mailApp = getSavedMailApp();
-            Intent emailIntent = MAIL_APP_OTHER.equals(mailApp)
-                    ? createShareIntent(attachmentUri)
-                    : createEmailIntent(recipient, attachmentUri);
+            boolean otherShare = MAIL_APP_OTHER.equals(mailApp);
+            attachmentUri = otherShare ? writePublicPptx(pptxBytes) : writeCachedPptx(pptxBytes);
+            Intent emailIntent = otherShare ? createShareIntent(attachmentUri) : createEmailIntent(recipient, attachmentUri);
             String mailPackage = selectedMailPackage();
             if (!mailPackage.isEmpty()) {
                 emailIntent.setPackage(mailPackage);
@@ -1379,6 +1363,52 @@ public class MainActivity extends ComponentActivity {
         } catch (Exception e) {
             Toast.makeText(this, "공유 화면을 열 수 없습니다.", Toast.LENGTH_LONG).show();
         }
+    }
+
+    private Uri writeCachedPptx(byte[] pptxBytes) throws IOException {
+        File exportDir = new File(getCacheDir(), "mail_exports");
+        if (!exportDir.exists() && !exportDir.mkdirs()) {
+            throw new IOException("Cannot create mail export directory");
+        }
+        File[] oldFiles = exportDir.listFiles();
+        if (oldFiles != null) {
+            for (File oldFile : oldFiles) {
+                oldFile.delete();
+            }
+        }
+
+        File pptxFile = new File(exportDir, pptxFileName());
+        try (FileOutputStream output = new FileOutputStream(pptxFile)) {
+            output.write(pptxBytes);
+        }
+        return FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", pptxFile);
+    }
+
+    private Uri writePublicPptx(byte[] pptxBytes) throws IOException {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, pptxFileName());
+            values.put(MediaStore.MediaColumns.MIME_TYPE, PPTX_MIME);
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AppraisalCamera");
+            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+
+            Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) {
+                throw new IOException("Cannot create shared PPTX");
+            }
+
+            try (OutputStream output = getContentResolver().openOutputStream(uri)) {
+                if (output == null) throw new IOException("No output stream");
+                output.write(pptxBytes);
+            }
+
+            ContentValues readyValues = new ContentValues();
+            readyValues.put(MediaStore.MediaColumns.IS_PENDING, 0);
+            getContentResolver().update(uri, readyValues, null, null);
+            return uri;
+        }
+
+        return writeCachedPptx(pptxBytes);
     }
 
     private Intent createEmailIntent(String recipient, Uri attachmentUri) {
