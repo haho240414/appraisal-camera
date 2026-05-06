@@ -181,30 +181,16 @@ final class PptxExporter {
         int id = 5;
         for (SlideItem item : slide.items) {
             long y = item.top ? TOP_PHOTO_Y : BOTTOM_PHOTO_Y;
-            FitRect fit = fitInside(item.photo, PHOTO_X, y, PHOTO_W, PHOTO_H);
             xml.append(frameRect(id++, PHOTO_X, y, PHOTO_W, PHOTO_H));
-            xml.append(picture(id++, item.relationshipId, item.imageName, fit.x, fit.y, fit.w, fit.h));
+            xml.append(picture(id++, item.relationshipId, item.imageName, PHOTO_X, y, PHOTO_W, PHOTO_H));
             if (item.photo.stamp != null && !item.photo.stamp.isEmpty()) {
-                xml.append(stampBox(id++, item.photo.stamp, fit.x + fit.w - emu(116), fit.y + fit.h - emu(24), emu(108), emu(17)));
+                xml.append(stampBox(id++, item.photo.stamp, PHOTO_X + PHOTO_W - emu(116), y + PHOTO_H - emu(24), emu(108), emu(17)));
             }
             xml.append(textShape(id++, item.photo.caption, emu(80), y + PHOTO_H + emu(22), emu(435), emu(25), 1100, false, "ctr"));
         }
         xml.append(textShape(id, "Page : " + pageNumber, emu(455), emu(805), emu(120), emu(20), 1000, false, "r"));
         xml.append("</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>");
         return xml.toString();
-    }
-
-    private static FitRect fitInside(PhotoData photo, long frameX, long frameY, long frameW, long frameH) {
-        if (photo.imageWidth <= 0 || photo.imageHeight <= 0) {
-            return new FitRect(frameX, frameY, frameW, frameH);
-        }
-
-        double scale = Math.min((double) frameW / photo.imageWidth, (double) frameH / photo.imageHeight);
-        long w = Math.round(photo.imageWidth * scale);
-        long h = Math.round(photo.imageHeight * scale);
-        long x = frameX + (frameW - w) / 2;
-        long y = frameY + (frameH - h) / 2;
-        return new FitRect(x, y, w, h);
     }
 
     private static String frameRect(int id, long x, long y, long w, long h) {
@@ -389,17 +375,4 @@ final class PptxExporter {
         }
     }
 
-    private static final class FitRect {
-        final long x;
-        final long y;
-        final long w;
-        final long h;
-
-        FitRect(long x, long y, long w, long h) {
-            this.x = x;
-            this.y = y;
-            this.w = w;
-            this.h = h;
-        }
-    }
 }

@@ -131,6 +131,7 @@ public class MainActivity extends ComponentActivity {
     private int guideScalePercent = 78;
     private WebView printWebView;
     private byte[] pendingPptxBytes;
+    private boolean updatingSymbolControls;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -273,6 +274,7 @@ public class MainActivity extends ComponentActivity {
         symbolSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (updatingSymbolControls) return;
                 String[] symbols = symbolsForCategory(currentCategory);
                 if (position >= 0 && position < symbols.length) {
                     currentSymbol = symbols[position];
@@ -292,6 +294,7 @@ public class MainActivity extends ComponentActivity {
         buildingSubSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (updatingSymbolControls) return;
                 if (position >= 0 && position < BUILDING_SUB_SYMBOLS.length) {
                     String sub = BUILDING_SUB_SYMBOLS[position];
                     currentBuildingSub = "없음".equals(sub) ? "" : sub;
@@ -707,24 +710,37 @@ public class MainActivity extends ComponentActivity {
         for (String symbol : symbols) {
             labels.add(categoryLabel(currentCategory) + " 기호 " + symbol);
         }
-        symbolSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels));
 
-        buildingSubSpinner.setVisibility(CATEGORY_BUILDING.equals(currentCategory) ? View.VISIBLE : View.GONE);
+        updatingSymbolControls = true;
+        try {
+            symbolSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels));
 
-        NextSymbol next = nextSymbol(currentCategory);
-        String targetBase = currentSymbol.isEmpty() ? next.base : currentSymbol;
-        int baseIndex = indexOfOrDefault(symbols, targetBase, indexOf(symbols, next.base));
-        symbolSpinner.setSelection(baseIndex);
+            buildingSubSpinner.setVisibility(CATEGORY_BUILDING.equals(currentCategory) ? View.VISIBLE : View.GONE);
 
-        String targetSub = currentBuildingSub;
-        if (targetSub.isEmpty() && currentSymbol.contains("-")) {
-            String[] parts = currentSymbol.split("-", 2);
-            targetSub = parts.length > 1 ? "-" + parts[1] : "";
+            NextSymbol next = nextSymbol(currentCategory);
+            String rawCurrentSymbol = currentSymbol;
+            String targetBase = currentSymbol.isEmpty() ? next.base : currentSymbol;
+            if (targetBase.contains("-")) {
+                targetBase = targetBase.split("-", 2)[0];
+            }
+            int baseIndex = indexOfOrDefault(symbols, targetBase, indexOf(symbols, next.base));
+            symbolSpinner.setSelection(baseIndex);
+            currentSymbol = symbols[baseIndex];
+
+            String targetSub = currentBuildingSub;
+            if (targetSub.isEmpty() && rawCurrentSymbol.contains("-")) {
+                String[] parts = rawCurrentSymbol.split("-", 2);
+                targetSub = parts.length > 1 ? "-" + parts[1] : "";
+            }
+            if (targetSub.isEmpty() && rawCurrentSymbol.isEmpty() && !next.sub.isEmpty()) {
+                targetSub = "-" + next.sub;
+            }
+            int subIndex = targetSub.isEmpty() ? 0 : indexOf(BUILDING_SUB_SYMBOLS, targetSub);
+            buildingSubSpinner.setSelection(subIndex);
+            currentBuildingSub = subIndex == 0 ? "" : BUILDING_SUB_SYMBOLS[subIndex];
+        } finally {
+            updatingSymbolControls = false;
         }
-        if (targetSub.isEmpty() && currentSymbol.isEmpty() && !next.sub.isEmpty()) {
-            targetSub = "-" + next.sub;
-        }
-        buildingSubSpinner.setSelection(targetSub.isEmpty() ? 0 : indexOf(BUILDING_SUB_SYMBOLS, targetSub));
     }
 
     private String[] symbolsForCategory(String category) {
@@ -1063,10 +1079,12 @@ public class MainActivity extends ComponentActivity {
 
         memoInput.setText("");
         currentMemo = "";
+        currentSymbol = "";
+        currentBuildingSub = "";
         savePhotos();
-        saveControlState();
         renderPhotos();
         updateSymbolControls();
+        saveControlState();
         statusText.setText(categoryLabel(currentCategory) + " 기호 " + symbol + " 사진을 등록했습니다.");
     }
 
@@ -1141,7 +1159,7 @@ public class MainActivity extends ComponentActivity {
         FrameLayout imageFrame = new FrameLayout(this);
 
         ImageView image = new ImageView(this);
-        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
         image.setBackgroundColor(Color.rgb(245, 245, 245));
         image.setImageURI(Uri.parse(photo.uri));
         imageFrame.addView(image, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
