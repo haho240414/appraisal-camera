@@ -34,6 +34,8 @@ import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
 import android.webkit.WebView;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
@@ -141,6 +143,7 @@ public class MainActivity extends ComponentActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         loadPhotos();
         loadPropertyAddress();
         loadGuideSettings();
@@ -296,11 +299,13 @@ public class MainActivity extends ComponentActivity {
 
         customSymbolInput = new EditText(this);
         customSymbolInput.setSingleLine(true);
+        customSymbolInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
         customSymbolInput.setHint("기타사항 입력");
         customSymbolInput.setTextSize(13);
         customSymbolInput.setPadding(dp(10), 0, dp(10), 0);
         customSymbolInput.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
         customSymbolInput.setVisibility(View.GONE);
+        customSymbolInput.setOnFocusChangeListener((view, hasFocus) -> keepInputVisible(view, hasFocus));
         customSymbolInput.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {
@@ -344,11 +349,13 @@ public class MainActivity extends ComponentActivity {
 
         memoInput = new EditText(this);
         memoInput.setSingleLine(true);
+        memoInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
         memoInput.setHint("사진 설명: 전경, 진입로, 외벽, 내부");
         memoInput.setTextSize(13);
         memoInput.setText(currentMemo);
         memoInput.setPadding(dp(10), 0, dp(10), 0);
         memoInput.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
+        memoInput.setOnFocusChangeListener((view, hasFocus) -> keepInputVisible(view, hasFocus));
         LinearLayout.LayoutParams memoParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34));
         memoParams.topMargin = dp(5);
         controlsPanel.addView(memoInput, memoParams);
@@ -724,6 +731,14 @@ public class MainActivity extends ComponentActivity {
             controlsPanel.setScaleX(scale);
             controlsPanel.setScaleY(scale);
         });
+    }
+
+    private void keepInputVisible(View view, boolean hasFocus) {
+        if (!hasFocus) return;
+        view.postDelayed(() -> view.requestRectangleOnScreen(
+                new Rect(0, 0, view.getWidth(), view.getHeight()),
+                true
+        ), 250);
     }
 
     private GradientDrawable roundedDrawable(int color, int strokeColor, int strokeDp, int radiusDp) {
@@ -1132,11 +1147,10 @@ public class MainActivity extends ComponentActivity {
         photos.add(item);
 
         memoInput.setText("");
-        if (customSymbolInput != null && CATEGORY_CUSTOM.equals(currentCategory)) {
-            customSymbolInput.setText("");
-        }
         currentMemo = "";
-        currentSymbol = "";
+        if (!CATEGORY_CUSTOM.equals(currentCategory)) {
+            currentSymbol = "";
+        }
         currentBuildingSub = "";
         savePhotos();
         renderPhotos();
