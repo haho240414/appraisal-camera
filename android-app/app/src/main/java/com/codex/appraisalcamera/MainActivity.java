@@ -142,7 +142,7 @@ public class MainActivity extends ComponentActivity {
 
         boolean portrait = isPortraitLayout();
         LinearLayout header = new LinearLayout(this);
-        header.setOrientation(portrait ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        header.setOrientation(portrait ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
         header.setGravity(Gravity.CENTER);
         header.setPadding(dp(6), dp(5), dp(6), dp(5));
         header.setBackground(roundedDrawable(Color.argb(166, 9, 14, 18), Color.TRANSPARENT, 0, 10));
@@ -152,24 +152,24 @@ public class MainActivity extends ComponentActivity {
 
         Button addressButton = smallButton("주소");
         addressButton.setOnClickListener(v -> showAddressDialog());
-        addToolbarButton(header, addressButton, portrait);
+        addToolbarButton(header, addressButton, !portrait);
 
         Button pptxButton = smallButton("PPTX");
         pptxButton.setOnClickListener(v -> exportPptx());
-        addToolbarButton(header, pptxButton, portrait);
+        addToolbarButton(header, pptxButton, !portrait);
 
         Button listButton = smallButton("목록");
         listButton.setOnClickListener(v -> showPhotoListDialog());
-        addToolbarButton(header, listButton, portrait);
+        addToolbarButton(header, listButton, !portrait);
 
         Button clearButton = smallButton("전체삭제");
         clearButton.setTextColor(Color.rgb(163, 69, 29));
         clearButton.setOnClickListener(v -> confirmClear());
-        addToolbarButton(header, clearButton, portrait);
+        addToolbarButton(header, clearButton, !portrait);
 
         Button settingsButton = smallButton("설정");
         settingsButton.setOnClickListener(v -> showGuideSettingsDialog());
-        addToolbarButton(header, settingsButton, portrait);
+        addToolbarButton(header, settingsButton, !portrait);
         overlay.addView(header, toolbarLayoutParams(portrait));
 
         controlsPanel = new LinearLayout(this);
@@ -281,20 +281,22 @@ public class MainActivity extends ComponentActivity {
     private FrameLayout.LayoutParams toolbarLayoutParams(boolean portrait) {
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         if (portrait) {
+            params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+        } else {
             params.gravity = Gravity.LEFT | Gravity.CENTER_VERTICAL;
             params.leftMargin = dp(4);
-        } else {
-            params.gravity = Gravity.TOP | Gravity.RIGHT;
         }
         return params;
     }
 
     private void addToolbarButton(LinearLayout toolbar, Button button, boolean vertical) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(vertical ? dp(76) : ViewGroup.LayoutParams.WRAP_CONTENT, dp(30));
-        if (vertical) {
-            params.bottomMargin = dp(5);
-        } else {
-            params.leftMargin = dp(4);
+        if (toolbar.getChildCount() > 0) {
+            if (vertical) {
+                params.topMargin = dp(5);
+            } else {
+                params.leftMargin = dp(4);
+            }
         }
         toolbar.addView(button, params);
     }
