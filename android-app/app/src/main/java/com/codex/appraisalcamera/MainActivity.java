@@ -9,6 +9,7 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -1361,14 +1362,16 @@ public class MainActivity extends ComponentActivity {
 
             attachmentUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", pptxFile);
             String mailApp = getSavedMailApp();
-            String mimeType = MAIL_APP_OTHER.equals(mailApp) ? "*/*" : PPTX_MIME;
-            Intent emailIntent = createEmailIntent(recipient, attachmentUri, mimeType);
+            Intent emailIntent = MAIL_APP_OTHER.equals(mailApp)
+                    ? createShareIntent(attachmentUri)
+                    : createEmailIntent(recipient, attachmentUri);
             String mailPackage = selectedMailPackage();
             if (!mailPackage.isEmpty()) {
                 emailIntent.setPackage(mailPackage);
                 grantUriPermission(mailPackage, attachmentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 startActivity(emailIntent);
             } else {
+                grantUriPermissionsToMatchingApps(emailIntent, attachmentUri);
                 startActivity(Intent.createChooser(emailIntent, "공유 앱 선택"));
             }
         } catch (ActivityNotFoundException e) {
@@ -1378,9 +1381,9 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
-    private Intent createEmailIntent(String recipient, Uri attachmentUri, String mimeType) {
+    private Intent createEmailIntent(String recipient, Uri attachmentUri) {
         Intent emailIntent = new Intent(Intent.ACTION_SEND);
-        emailIntent.setType(mimeType);
+        emailIntent.setType(PPTX_MIME);
         emailIntent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{PPTX_MIME, "application/octet-stream"});
         if (recipient != null && !recipient.trim().isEmpty()) {
             emailIntent.putExtra(Intent.EXTRA_EMAIL, new String[]{recipient.trim()});
@@ -1393,13 +1396,32 @@ public class MainActivity extends ComponentActivity {
         return emailIntent;
     }
 
+    private Intent createShareIntent(Uri attachmentUri) {
+        Intent shareIntent = new Intent(Intent.ACTION_SEND);
+        shareIntent.setType("*/*");
+        shareIntent.putExtra(Intent.EXTRA_STREAM, attachmentUri);
+        shareIntent.putExtra(Intent.EXTRA_TITLE, documentHeaderText() + " 사진자료");
+        shareIntent.setClipData(ClipData.newUri(getContentResolver(), "사진자료 PPTX", attachmentUri));
+        shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        return shareIntent;
+    }
+
+    private void grantUriPermissionsToMatchingApps(Intent intent, Uri attachmentUri) {
+        for (ResolveInfo resolveInfo : getPackageManager().queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)) {
+            if (resolveInfo.activityInfo != null && resolveInfo.activityInfo.packageName != null) {
+                grantUriPermission(resolveInfo.activityInfo.packageName, attachmentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
+        }
+    }
+
     private void openEmailChooserFallback(String recipient, Uri attachmentUri) {
         if (attachmentUri == null) {
             Toast.makeText(this, "공유 화면을 열 수 없습니다. 설정에서 'Other'로 바꿔 다시 시도해주세요.", Toast.LENGTH_LONG).show();
             return;
         }
         try {
-            Intent fallbackIntent = createEmailIntent(recipient, attachmentUri, "*/*");
+            Intent fallbackIntent = createShareIntent(attachmentUri);
+            grantUriPermissionsToMatchingApps(fallbackIntent, attachmentUri);
             startActivity(Intent.createChooser(fallbackIntent, "공유 앱 선택"));
         } catch (Exception fallbackError) {
             Toast.makeText(this, "공유 화면을 열 수 없습니다. 설정에서 'Other'로 바꿔 다시 시도해주세요.", Toast.LENGTH_LONG).show();
