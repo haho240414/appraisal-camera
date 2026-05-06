@@ -95,11 +95,9 @@ public class MainActivity extends ComponentActivity {
     private static final String STATE_CURRENT_SYMBOL = "state_current_symbol";
     private static final String STATE_CURRENT_BUILDING_SUB = "state_current_building_sub";
     private static final String STATE_CURRENT_MEMO = "state_current_memo";
-    private static final String MAIL_APP_CHOOSER = "chooser";
+    private static final String MAIL_APP_OTHER = "other";
     private static final String MAIL_APP_GMAIL = "gmail";
-    private static final String MAIL_APP_NAVER = "naver";
     private static final String GMAIL_PACKAGE = "com.google.android.gm";
-    private static final String NAVER_MAIL_PACKAGE = "com.nhn.android.mail";
     private static final String PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
     private static final String CATEGORY_LAND = "land";
@@ -210,7 +208,7 @@ public class MainActivity extends ComponentActivity {
         Button pptxButton = smallButton("PPTX");
         pptxButton.setOnClickListener(v -> exportPptx());
 
-        Button emailButton = smallButton("메일");
+        Button emailButton = smallButton("공유");
         emailButton.setOnClickListener(v -> showEmailDialog());
 
         Button listButton = smallButton("목록");
@@ -513,12 +511,13 @@ public class MainActivity extends ComponentActivity {
 
     private void showEmailDialog() {
         if (photos.isEmpty()) {
-            Toast.makeText(this, "발송할 사진이 없습니다.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "공유할 사진이 없습니다.", Toast.LENGTH_SHORT).show();
             return;
         }
 
+        String shareMode = getSavedMailApp();
         String savedRecipient = getSavedEmailRecipient();
-        if (!savedRecipient.isEmpty()) {
+        if (MAIL_APP_OTHER.equals(shareMode) || !savedRecipient.isEmpty()) {
             sendPptxEmail(savedRecipient);
             return;
         }
@@ -575,7 +574,7 @@ public class MainActivity extends ComponentActivity {
         emailButtonParams.bottomMargin = dp(12);
         content.addView(emailSettingsButton, emailButtonParams);
 
-        TextView mailAppLabel = settingLabel("기본 메일 앱");
+        TextView mailAppLabel = settingLabel("기본 공유 방식");
         content.addView(mailAppLabel);
         TextView mailAppValue = new TextView(this);
         mailAppValue.setText(mailAppLabel(getSavedMailApp()));
@@ -585,7 +584,7 @@ public class MainActivity extends ComponentActivity {
         mailAppValueParams.topMargin = dp(3);
         content.addView(mailAppValue, mailAppValueParams);
 
-        Button mailAppSettingsButton = secondaryButton("메일 앱 설정");
+        Button mailAppSettingsButton = secondaryButton("공유 방식 설정");
         mailAppSettingsButton.setOnClickListener(v -> showMailAppDialog());
         LinearLayout.LayoutParams mailAppButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36));
         mailAppButtonParams.topMargin = dp(6);
@@ -657,12 +656,12 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void showMailAppDialog() {
-        String[] labels = {"앱 선택", "Gmail", "네이버 메일"};
-        String[] values = {MAIL_APP_CHOOSER, MAIL_APP_GMAIL, MAIL_APP_NAVER};
+        String[] labels = {"Gmail", "Other"};
+        String[] values = {MAIL_APP_GMAIL, MAIL_APP_OTHER};
         int checked = indexOf(values, getSavedMailApp());
 
         new AlertDialog.Builder(this)
-                .setTitle("기본 메일 앱")
+                .setTitle("기본 공유 방식")
                 .setSingleChoiceItems(labels, checked, (dialog, which) -> {
                     saveMailApp(values[which]);
                     Toast.makeText(this, labels[which] + "로 설정했습니다.", Toast.LENGTH_SHORT).show();
@@ -1362,7 +1361,7 @@ public class MainActivity extends ComponentActivity {
 
             attachmentUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", pptxFile);
             String mailApp = getSavedMailApp();
-            String mimeType = MAIL_APP_NAVER.equals(mailApp) ? "*/*" : PPTX_MIME;
+            String mimeType = MAIL_APP_OTHER.equals(mailApp) ? "*/*" : PPTX_MIME;
             Intent emailIntent = createEmailIntent(recipient, attachmentUri, mimeType);
             String mailPackage = selectedMailPackage();
             if (!mailPackage.isEmpty()) {
@@ -1370,12 +1369,12 @@ public class MainActivity extends ComponentActivity {
                 grantUriPermission(mailPackage, attachmentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 startActivity(emailIntent);
             } else {
-                startActivity(Intent.createChooser(emailIntent, "메일 앱 선택"));
+                startActivity(Intent.createChooser(emailIntent, "공유 앱 선택"));
             }
         } catch (ActivityNotFoundException e) {
             openEmailChooserFallback(recipient, attachmentUri);
         } catch (Exception e) {
-            Toast.makeText(this, "메일 발송 화면을 열 수 없습니다.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "공유 화면을 열 수 없습니다.", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -1383,7 +1382,9 @@ public class MainActivity extends ComponentActivity {
         Intent emailIntent = new Intent(Intent.ACTION_SEND);
         emailIntent.setType(mimeType);
         emailIntent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{PPTX_MIME, "application/octet-stream"});
-        emailIntent.putExtra(Intent.EXTRA_EMAIL, new String[]{recipient});
+        if (recipient != null && !recipient.trim().isEmpty()) {
+            emailIntent.putExtra(Intent.EXTRA_EMAIL, new String[]{recipient.trim()});
+        }
         emailIntent.putExtra(Intent.EXTRA_SUBJECT, documentHeaderText() + " 사진자료");
         emailIntent.putExtra(Intent.EXTRA_TEXT, "사진자료 PPTX 파일을 첨부합니다.");
         emailIntent.putExtra(Intent.EXTRA_STREAM, attachmentUri);
@@ -1394,14 +1395,14 @@ public class MainActivity extends ComponentActivity {
 
     private void openEmailChooserFallback(String recipient, Uri attachmentUri) {
         if (attachmentUri == null) {
-            Toast.makeText(this, "선택한 메일 앱을 열 수 없습니다. 설정에서 '앱 선택'으로 바꿔 다시 시도해주세요.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "공유 화면을 열 수 없습니다. 설정에서 'Other'로 바꿔 다시 시도해주세요.", Toast.LENGTH_LONG).show();
             return;
         }
         try {
             Intent fallbackIntent = createEmailIntent(recipient, attachmentUri, "*/*");
-            startActivity(Intent.createChooser(fallbackIntent, "메일 앱 선택"));
+            startActivity(Intent.createChooser(fallbackIntent, "공유 앱 선택"));
         } catch (Exception fallbackError) {
-            Toast.makeText(this, "선택한 메일 앱을 열 수 없습니다. 설정에서 '앱 선택'으로 바꿔 다시 시도해주세요.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "공유 화면을 열 수 없습니다. 설정에서 'Other'로 바꿔 다시 시도해주세요.", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -1452,7 +1453,11 @@ public class MainActivity extends ComponentActivity {
     }
 
     private String getSavedMailApp() {
-        return getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_MAIL_APP, MAIL_APP_CHOOSER);
+        String mailApp = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_MAIL_APP, MAIL_APP_OTHER);
+        if ("chooser".equals(mailApp) || "naver".equals(mailApp)) {
+            return MAIL_APP_OTHER;
+        }
+        return mailApp;
     }
 
     private void saveMailApp(String mailApp) {
@@ -1462,14 +1467,12 @@ public class MainActivity extends ComponentActivity {
     private String selectedMailPackage() {
         String mailApp = getSavedMailApp();
         if (MAIL_APP_GMAIL.equals(mailApp)) return GMAIL_PACKAGE;
-        if (MAIL_APP_NAVER.equals(mailApp)) return NAVER_MAIL_PACKAGE;
         return "";
     }
 
     private String mailAppLabel(String mailApp) {
         if (MAIL_APP_GMAIL.equals(mailApp)) return "Gmail";
-        if (MAIL_APP_NAVER.equals(mailApp)) return "네이버 메일";
-        return "앱 선택";
+        return "Other";
     }
 
     private String buildPrintHtml() {
