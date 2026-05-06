@@ -31,6 +31,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -84,8 +85,16 @@ public class MainActivity extends ComponentActivity {
     private static final String PREF_ADDRESS = "property_address";
     private static final String PREF_EMAIL = "email_recipient";
     private static final String PREF_MAIL_APP = "mail_app";
+    private static final String PREF_CURRENT_CATEGORY = "current_category";
+    private static final String PREF_CURRENT_SYMBOL = "current_symbol";
+    private static final String PREF_CURRENT_BUILDING_SUB = "current_building_sub";
+    private static final String PREF_CURRENT_MEMO = "current_memo";
     private static final String PREF_GUIDE_ALPHA = "guide_alpha_percent";
     private static final String PREF_GUIDE_SCALE = "guide_scale_percent";
+    private static final String STATE_CURRENT_CATEGORY = "state_current_category";
+    private static final String STATE_CURRENT_SYMBOL = "state_current_symbol";
+    private static final String STATE_CURRENT_BUILDING_SUB = "state_current_building_sub";
+    private static final String STATE_CURRENT_MEMO = "state_current_memo";
     private static final String MAIL_APP_CHOOSER = "chooser";
     private static final String MAIL_APP_GMAIL = "gmail";
     private static final String MAIL_APP_NAVER = "naver";
@@ -114,6 +123,9 @@ public class MainActivity extends ComponentActivity {
     private PreviewView previewView;
     private ImageCapture imageCapture;
     private String currentCategory = CATEGORY_LAND;
+    private String currentSymbol = "";
+    private String currentBuildingSub = "";
+    private String currentMemo = "";
     private String propertyAddress = "";
     private int guideAlphaPercent = 82;
     private int guideScalePercent = 78;
@@ -126,10 +138,27 @@ public class MainActivity extends ComponentActivity {
         loadPhotos();
         loadPropertyAddress();
         loadGuideSettings();
+        restoreControlState(savedInstanceState);
         buildUi();
         updateSymbolControls();
         renderPhotos();
         requestCameraPreview();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        saveControlState();
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        rememberCurrentSelection();
+        outState.putString(STATE_CURRENT_CATEGORY, currentCategory);
+        outState.putString(STATE_CURRENT_SYMBOL, currentSymbol);
+        outState.putString(STATE_CURRENT_BUILDING_SUB, currentBuildingSub);
+        outState.putString(STATE_CURRENT_MEMO, currentMemo);
+        super.onSaveInstanceState(outState);
     }
 
     private static String[] makeNumberSymbols(int count) {
@@ -216,15 +245,21 @@ public class MainActivity extends ComponentActivity {
         categoryGroup.setOrientation(RadioGroup.HORIZONTAL);
         categoryGroup.setGravity(Gravity.CENTER);
         categoryGroup.setPadding(0, dp(4), 0, 0);
-        categoryGroup.addView(categoryRadio("토지", CATEGORY_LAND, true), equalRadioParams());
-        categoryGroup.addView(categoryRadio("건물", CATEGORY_BUILDING, false), equalRadioParams());
-        categoryGroup.addView(categoryRadio("제시외", CATEGORY_EXTRA, false), equalRadioParams());
+        categoryGroup.addView(categoryRadio("토지", CATEGORY_LAND, CATEGORY_LAND.equals(currentCategory)), equalRadioParams());
+        categoryGroup.addView(categoryRadio("건물", CATEGORY_BUILDING, CATEGORY_BUILDING.equals(currentCategory)), equalRadioParams());
+        categoryGroup.addView(categoryRadio("제시외", CATEGORY_EXTRA, CATEGORY_EXTRA.equals(currentCategory)), equalRadioParams());
         categoryGroup.setOnCheckedChangeListener((group, checkedId) -> {
             RadioButton checked = findViewById(checkedId);
             if (checked == null) return;
-            currentCategory = String.valueOf(checked.getTag());
+            String selectedCategory = String.valueOf(checked.getTag());
+            if (!selectedCategory.equals(currentCategory)) {
+                currentCategory = selectedCategory;
+                currentSymbol = "";
+                currentBuildingSub = "";
+            }
             updateCategoryStyles();
             updateSymbolControls();
+            saveControlState();
         });
         controlsPanel.addView(categoryGroup);
         updateCategoryStyles();
@@ -235,11 +270,39 @@ public class MainActivity extends ComponentActivity {
 
         symbolSpinner = new Spinner(this);
         symbolSpinner.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
+        symbolSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                String[] symbols = symbolsForCategory(currentCategory);
+                if (position >= 0 && position < symbols.length) {
+                    currentSymbol = symbols[position];
+                    saveControlState();
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
         symbolRow.addView(symbolSpinner, new LinearLayout.LayoutParams(0, dp(34), 1));
 
         buildingSubSpinner = new Spinner(this);
         buildingSubSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, BUILDING_SUB_SYMBOLS));
         buildingSubSpinner.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
+        buildingSubSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (position >= 0 && position < BUILDING_SUB_SYMBOLS.length) {
+                    String sub = BUILDING_SUB_SYMBOLS[position];
+                    currentBuildingSub = "없음".equals(sub) ? "" : sub;
+                    saveControlState();
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
         LinearLayout.LayoutParams subParams = new LinearLayout.LayoutParams(dp(82), dp(34));
         subParams.leftMargin = dp(6);
         symbolRow.addView(buildingSubSpinner, subParams);
@@ -249,6 +312,7 @@ public class MainActivity extends ComponentActivity {
         memoInput.setSingleLine(true);
         memoInput.setHint("사진 설명: 전경, 진입로, 외벽, 내부");
         memoInput.setTextSize(13);
+        memoInput.setText(currentMemo);
         memoInput.setPadding(dp(10), 0, dp(10), 0);
         memoInput.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
         LinearLayout.LayoutParams memoParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34));
@@ -648,8 +712,19 @@ public class MainActivity extends ComponentActivity {
         buildingSubSpinner.setVisibility(CATEGORY_BUILDING.equals(currentCategory) ? View.VISIBLE : View.GONE);
 
         NextSymbol next = nextSymbol(currentCategory);
-        symbolSpinner.setSelection(indexOf(symbols, next.base));
-        buildingSubSpinner.setSelection(next.sub.isEmpty() ? 0 : indexOf(BUILDING_SUB_SYMBOLS, "-" + next.sub));
+        String targetBase = currentSymbol.isEmpty() ? next.base : currentSymbol;
+        int baseIndex = indexOfOrDefault(symbols, targetBase, indexOf(symbols, next.base));
+        symbolSpinner.setSelection(baseIndex);
+
+        String targetSub = currentBuildingSub;
+        if (targetSub.isEmpty() && currentSymbol.contains("-")) {
+            String[] parts = currentSymbol.split("-", 2);
+            targetSub = parts.length > 1 ? "-" + parts[1] : "";
+        }
+        if (targetSub.isEmpty() && currentSymbol.isEmpty() && !next.sub.isEmpty()) {
+            targetSub = "-" + next.sub;
+        }
+        buildingSubSpinner.setSelection(targetSub.isEmpty() ? 0 : indexOf(BUILDING_SUB_SYMBOLS, targetSub));
     }
 
     private String[] symbolsForCategory(String category) {
@@ -787,18 +862,23 @@ public class MainActivity extends ComponentActivity {
         }
 
         long capturedAt = System.currentTimeMillis();
-        ImageCapture.OutputFileOptions options = new ImageCapture.OutputFileOptions.Builder(getContentResolver(), MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cameraContentValues()).build();
+        final File outputFile;
+        try {
+            outputFile = createAppImageFile(capturedAt);
+        } catch (IOException e) {
+            Toast.makeText(this, "앱 내부 사진 저장 폴더를 만들 수 없습니다.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        ImageCapture.OutputFileOptions options = new ImageCapture.OutputFileOptions.Builder(outputFile).build();
         imageCapture.takePicture(options, ContextCompat.getMainExecutor(this), new ImageCapture.OnImageSavedCallback() {
             @Override
             public void onImageSaved(ImageCapture.OutputFileResults outputFileResults) {
                 Uri savedUri = outputFileResults.getSavedUri();
                 if (savedUri == null) {
-                    Toast.makeText(MainActivity.this, "사진 저장 위치를 확인할 수 없습니다.", Toast.LENGTH_SHORT).show();
-                    return;
+                    savedUri = Uri.fromFile(outputFile);
                 }
-                stampSavedImage(savedUri, capturedAt);
-                markImageReady(savedUri);
-                addPhoto(savedUri.toString(), capturedAt);
+                addPhoto(savedUri.toString(), capturedAt, false);
             }
 
             @Override
@@ -806,6 +886,33 @@ public class MainActivity extends ComponentActivity {
                 Toast.makeText(MainActivity.this, "촬영 저장에 실패했습니다.", Toast.LENGTH_SHORT).show();
             }
         });
+    }
+
+    private File createAppImageFile(long capturedAt) throws IOException {
+        File picturesRoot = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
+        if (picturesRoot == null) {
+            picturesRoot = new File(getFilesDir(), "Pictures");
+        }
+
+        File addressDir = new File(new File(picturesRoot, "AppraisalCamera"), propertyFolderName());
+        if (!addressDir.exists() && !addressDir.mkdirs()) {
+            throw new IOException("Cannot create app photo directory");
+        }
+
+        String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.KOREA).format(new Date(capturedAt));
+        return new File(addressDir, "appraisal_" + timestamp + ".jpg");
+    }
+
+    private String propertyFolderName() {
+        String name = documentHeaderText();
+        if ("자체감정 사진".equals(name)) {
+            name = "미지정_물건지";
+        }
+        name = name.replaceAll("[\\\\/:*?\"<>|\\r\\n]+", "_").trim();
+        if (name.isEmpty()) {
+            return "미지정_물건지";
+        }
+        return name.length() > 80 ? name.substring(0, 80) : name;
     }
 
     private void stampSavedImage(Uri uri, long capturedAt) {
@@ -955,7 +1062,9 @@ public class MainActivity extends ComponentActivity {
         photos.add(item);
 
         memoInput.setText("");
+        currentMemo = "";
         savePhotos();
+        saveControlState();
         renderPhotos();
         updateSymbolControls();
         statusText.setText(categoryLabel(currentCategory) + " 기호 " + symbol + " 사진을 등록했습니다.");
@@ -1073,6 +1182,7 @@ public class MainActivity extends ComponentActivity {
         deleteButton.setTextColor(Color.rgb(163, 69, 29));
         deleteButton.setOnClickListener(v -> {
             photos.remove(photo);
+            deleteAppPhotoFile(photo);
             savePhotos();
             renderPhotos();
             updateSymbolControls();
@@ -1138,6 +1248,9 @@ public class MainActivity extends ComponentActivity {
                 .setTitle("전체 삭제")
                 .setMessage("등록된 사진 목록을 모두 삭제할까요?")
                 .setPositiveButton("삭제", (dialog, which) -> {
+                    for (PhotoItem photo : new ArrayList<>(photos)) {
+                        deleteAppPhotoFile(photo);
+                    }
                     photos.clear();
                     savePhotos();
                     renderPhotos();
@@ -1264,6 +1377,30 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
+    private void deleteAppPhotoFile(PhotoItem photo) {
+        try {
+            Uri uri = Uri.parse(photo.uri);
+            if (!"file".equals(uri.getScheme()) || uri.getPath() == null) return;
+
+            File file = new File(uri.getPath());
+            String filePath = file.getCanonicalPath();
+            File externalRoot = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
+            File internalRoot = new File(getFilesDir(), "Pictures");
+            boolean appOwned = startsWithRoot(filePath, externalRoot) || startsWithRoot(filePath, internalRoot);
+            if (appOwned && file.exists()) {
+                file.delete();
+            }
+        } catch (IOException ignored) {
+            // Metadata removal should still succeed even if a file cannot be deleted.
+        }
+    }
+
+    private boolean startsWithRoot(String filePath, File root) throws IOException {
+        if (root == null) return false;
+        String rootPath = root.getCanonicalPath();
+        return filePath.equals(rootPath) || filePath.startsWith(rootPath + File.separator);
+    }
+
     private String getSavedEmailRecipient() {
         return getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_EMAIL, "").trim();
     }
@@ -1380,6 +1517,62 @@ public class MainActivity extends ComponentActivity {
         guideScalePercent = clamp(prefs.getInt(PREF_GUIDE_SCALE, 78), 60, 100);
     }
 
+    private void restoreControlState(Bundle savedInstanceState) {
+        if (savedInstanceState != null) {
+            currentCategory = normalizeCategory(savedInstanceState.getString(STATE_CURRENT_CATEGORY, CATEGORY_LAND));
+            currentSymbol = savedInstanceState.getString(STATE_CURRENT_SYMBOL, "");
+            currentBuildingSub = savedInstanceState.getString(STATE_CURRENT_BUILDING_SUB, "");
+            currentMemo = savedInstanceState.getString(STATE_CURRENT_MEMO, "");
+            return;
+        }
+
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        currentCategory = normalizeCategory(prefs.getString(PREF_CURRENT_CATEGORY, CATEGORY_LAND));
+        currentSymbol = prefs.getString(PREF_CURRENT_SYMBOL, "");
+        currentBuildingSub = prefs.getString(PREF_CURRENT_BUILDING_SUB, "");
+        currentMemo = prefs.getString(PREF_CURRENT_MEMO, "");
+    }
+
+    private void saveControlState() {
+        rememberCurrentSelection();
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit()
+                .putString(PREF_CURRENT_CATEGORY, currentCategory)
+                .putString(PREF_CURRENT_SYMBOL, currentSymbol)
+                .putString(PREF_CURRENT_BUILDING_SUB, currentBuildingSub)
+                .putString(PREF_CURRENT_MEMO, currentMemo)
+                .apply();
+    }
+
+    private void rememberCurrentSelection() {
+        if (symbolSpinner != null && symbolSpinner.getAdapter() != null) {
+            String[] symbols = symbolsForCategory(currentCategory);
+            int position = symbolSpinner.getSelectedItemPosition();
+            if (position >= 0 && position < symbols.length) {
+                currentSymbol = symbols[position];
+            }
+        }
+
+        if (buildingSubSpinner != null && buildingSubSpinner.getAdapter() != null) {
+            int position = buildingSubSpinner.getSelectedItemPosition();
+            if (position >= 0 && position < BUILDING_SUB_SYMBOLS.length) {
+                String sub = BUILDING_SUB_SYMBOLS[position];
+                currentBuildingSub = "없음".equals(sub) ? "" : sub;
+            }
+        }
+
+        if (memoInput != null) {
+            currentMemo = memoInput.getText().toString();
+        }
+    }
+
+    private String normalizeCategory(String category) {
+        for (String value : CATEGORY_ORDER) {
+            if (value.equals(category)) return value;
+        }
+        return CATEGORY_LAND;
+    }
+
     private void saveGuideSettings() {
         getSharedPreferences(PREFS, MODE_PRIVATE)
                 .edit()
@@ -1423,7 +1616,7 @@ public class MainActivity extends ComponentActivity {
     }
 
     private String displayPhotoStamp(PhotoItem photo) {
-        return photo.stamped ? "" : photoStamp(photo);
+        return photoStamp(photo);
     }
 
     private String photoCaption(PhotoItem photo) {
@@ -1443,6 +1636,13 @@ public class MainActivity extends ComponentActivity {
             if (values[i].equals(target)) return i;
         }
         return 0;
+    }
+
+    private static int indexOfOrDefault(String[] values, String target, int fallback) {
+        for (int i = 0; i < values.length; i++) {
+            if (values[i].equals(target)) return i;
+        }
+        return fallback;
     }
 
     private static String escapeHtml(String value) {
