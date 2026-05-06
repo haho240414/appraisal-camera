@@ -442,27 +442,37 @@ public class MainActivity extends ComponentActivity {
             return;
         }
 
+        String savedRecipient = getSavedEmailRecipient();
+        if (!savedRecipient.isEmpty()) {
+            sendPptxEmail(savedRecipient);
+            return;
+        }
+
+        showEmailAddressDialog();
+    }
+
+    private void showEmailAddressDialog() {
         EditText input = new EditText(this);
         input.setSingleLine(true);
-        input.setHint("받는 메일주소");
-        input.setText(getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_EMAIL, ""));
+        input.setHint("기본 수신 메일주소");
+        input.setText(getSavedEmailRecipient());
         input.setSelectAllOnFocus(false);
         input.setTextSize(14);
         input.setPadding(dp(10), 0, dp(10), 0);
         input.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
 
         new AlertDialog.Builder(this)
-                .setTitle("PPTX 메일 발송")
+                .setTitle("기본 메일주소")
                 .setView(input)
                 .setNegativeButton("취소", null)
-                .setPositiveButton("메일 열기", (dialog, which) -> {
+                .setPositiveButton("저장", (dialog, which) -> {
                     String recipient = input.getText().toString().trim();
                     if (!recipient.contains("@")) {
                         Toast.makeText(this, "메일주소를 확인해주세요.", Toast.LENGTH_LONG).show();
                         return;
                     }
-                    getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_EMAIL, recipient).apply();
-                    sendPptxEmail(recipient);
+                    saveEmailRecipient(recipient);
+                    Toast.makeText(this, "기본 메일주소가 저장되었습니다.", Toast.LENGTH_SHORT).show();
                 })
                 .show();
     }
@@ -471,6 +481,24 @@ public class MainActivity extends ComponentActivity {
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(18), dp(12), dp(18), 0);
+
+        TextView emailLabel = settingLabel("기본 메일주소");
+        content.addView(emailLabel);
+        TextView emailValue = new TextView(this);
+        String savedEmail = getSavedEmailRecipient();
+        emailValue.setText(savedEmail.isEmpty() ? "미설정" : savedEmail);
+        emailValue.setTextSize(13);
+        emailValue.setTextColor(Color.rgb(82, 91, 105));
+        LinearLayout.LayoutParams emailValueParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        emailValueParams.topMargin = dp(3);
+        content.addView(emailValue, emailValueParams);
+
+        Button emailSettingsButton = secondaryButton("메일주소 설정");
+        emailSettingsButton.setOnClickListener(v -> showEmailAddressDialog());
+        LinearLayout.LayoutParams emailButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36));
+        emailButtonParams.topMargin = dp(6);
+        emailButtonParams.bottomMargin = dp(12);
+        content.addView(emailSettingsButton, emailButtonParams);
 
         TextView alphaLabel = settingLabel("배경 불투명도 " + guideAlphaPercent + "%");
         content.addView(alphaLabel);
@@ -1181,6 +1209,14 @@ public class MainActivity extends ComponentActivity {
         } finally {
             pendingPptxBytes = null;
         }
+    }
+
+    private String getSavedEmailRecipient() {
+        return getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_EMAIL, "").trim();
+    }
+
+    private void saveEmailRecipient(String recipient) {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_EMAIL, recipient.trim()).apply();
     }
 
     private String buildPrintHtml() {
