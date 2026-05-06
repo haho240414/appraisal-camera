@@ -29,6 +29,8 @@ import android.provider.MediaStore;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -105,7 +107,8 @@ public class MainActivity extends ComponentActivity {
     private static final String CATEGORY_LAND = "land";
     private static final String CATEGORY_BUILDING = "building";
     private static final String CATEGORY_EXTRA = "extra";
-    private static final String[] CATEGORY_ORDER = {CATEGORY_LAND, CATEGORY_BUILDING, CATEGORY_EXTRA};
+    private static final String CATEGORY_CUSTOM = "custom";
+    private static final String[] CATEGORY_ORDER = {CATEGORY_LAND, CATEGORY_BUILDING, CATEGORY_EXTRA, CATEGORY_CUSTOM};
     private static final String[] LAND_SYMBOLS = makeNumberSymbols(99);
     private static final String[] BUILDING_SYMBOLS = {"가", "나", "다", "라", "마", "바", "사", "아", "자", "차", "카", "타", "파", "하"};
     private static final String[] EXTRA_SYMBOLS = {"ㄱ", "ㄴ", "ㄷ", "ㄹ", "ㅁ", "ㅂ", "ㅅ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"};
@@ -120,6 +123,7 @@ public class MainActivity extends ComponentActivity {
     private RadioGroup categoryGroup;
     private Spinner symbolSpinner;
     private Spinner buildingSubSpinner;
+    private EditText customSymbolInput;
     private EditText memoInput;
     private PreviewView previewView;
     private ImageCapture imageCapture;
@@ -250,6 +254,7 @@ public class MainActivity extends ComponentActivity {
         categoryGroup.addView(categoryRadio("토지", CATEGORY_LAND, CATEGORY_LAND.equals(currentCategory)), equalRadioParams());
         categoryGroup.addView(categoryRadio("건물", CATEGORY_BUILDING, CATEGORY_BUILDING.equals(currentCategory)), equalRadioParams());
         categoryGroup.addView(categoryRadio("제시외", CATEGORY_EXTRA, CATEGORY_EXTRA.equals(currentCategory)), equalRadioParams());
+        categoryGroup.addView(categoryRadio("기타", CATEGORY_CUSTOM, CATEGORY_CUSTOM.equals(currentCategory)), equalRadioParams());
         categoryGroup.setOnCheckedChangeListener((group, checkedId) -> {
             RadioButton checked = findViewById(checkedId);
             if (checked == null) return;
@@ -288,6 +293,31 @@ public class MainActivity extends ComponentActivity {
             }
         });
         symbolRow.addView(symbolSpinner, new LinearLayout.LayoutParams(0, dp(34), 1));
+
+        customSymbolInput = new EditText(this);
+        customSymbolInput.setSingleLine(true);
+        customSymbolInput.setHint("기타사항 입력");
+        customSymbolInput.setTextSize(13);
+        customSymbolInput.setPadding(dp(10), 0, dp(10), 0);
+        customSymbolInput.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
+        customSymbolInput.setVisibility(View.GONE);
+        customSymbolInput.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                if (updatingSymbolControls || !CATEGORY_CUSTOM.equals(currentCategory)) return;
+                currentSymbol = s.toString().trim();
+                saveControlState();
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+            }
+        });
+        symbolRow.addView(customSymbolInput, new LinearLayout.LayoutParams(0, dp(34), 1));
 
         buildingSubSpinner = new Spinner(this);
         buildingSubSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, BUILDING_SUB_SYMBOLS));
@@ -417,12 +447,12 @@ public class MainActivity extends ComponentActivity {
         radio.setId(View.generateViewId());
         radio.setText(label);
         radio.setTag(category);
-        radio.setTextSize(12);
+        radio.setTextSize(11);
         radio.setTypeface(Typeface.DEFAULT_BOLD);
         radio.setGravity(Gravity.CENTER);
         radio.setChecked(checked);
         radio.setButtonDrawable(null);
-        radio.setPadding(dp(6), 0, dp(6), 0);
+        radio.setPadding(dp(4), 0, dp(4), 0);
         return radio;
     }
 
@@ -707,6 +737,21 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void updateSymbolControls() {
+        if (CATEGORY_CUSTOM.equals(currentCategory)) {
+            updatingSymbolControls = true;
+            try {
+                symbolSpinner.setVisibility(View.GONE);
+                buildingSubSpinner.setVisibility(View.GONE);
+                customSymbolInput.setVisibility(View.VISIBLE);
+                customSymbolInput.setText(currentSymbol);
+                customSymbolInput.setSelection(customSymbolInput.getText().length());
+                currentBuildingSub = "";
+            } finally {
+                updatingSymbolControls = false;
+            }
+            return;
+        }
+
         String[] symbols = symbolsForCategory(currentCategory);
         ArrayList<String> labels = new ArrayList<>();
         for (String symbol : symbols) {
@@ -715,6 +760,8 @@ public class MainActivity extends ComponentActivity {
 
         updatingSymbolControls = true;
         try {
+            symbolSpinner.setVisibility(View.VISIBLE);
+            customSymbolInput.setVisibility(View.GONE);
             symbolSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels));
 
             buildingSubSpinner.setVisibility(CATEGORY_BUILDING.equals(currentCategory) ? View.VISIBLE : View.GONE);
@@ -752,6 +799,11 @@ public class MainActivity extends ComponentActivity {
     }
 
     private String selectedSymbol() {
+        if (CATEGORY_CUSTOM.equals(currentCategory)) {
+            String custom = customSymbolInput.getText().toString().trim();
+            return custom.isEmpty() ? "기타사항" : custom;
+        }
+
         String base = symbolsForCategory(currentCategory)[symbolSpinner.getSelectedItemPosition()];
         if (!CATEGORY_BUILDING.equals(currentCategory)) return base;
 
@@ -1080,6 +1132,9 @@ public class MainActivity extends ComponentActivity {
         photos.add(item);
 
         memoInput.setText("");
+        if (customSymbolInput != null && CATEGORY_CUSTOM.equals(currentCategory)) {
+            customSymbolInput.setText("");
+        }
         currentMemo = "";
         currentSymbol = "";
         currentBuildingSub = "";
@@ -1087,7 +1142,7 @@ public class MainActivity extends ComponentActivity {
         renderPhotos();
         updateSymbolControls();
         saveControlState();
-        statusText.setText(categoryLabel(currentCategory) + " 기호 " + symbol + " 사진을 등록했습니다.");
+        statusText.setText(photoTitle(item) + " 사진을 등록했습니다.");
     }
 
     private void renderPhotos() {
@@ -1096,7 +1151,7 @@ public class MainActivity extends ComponentActivity {
 
         if (photos.isEmpty()) {
             TextView empty = new TextView(this);
-            empty.setText("촬영한 사진이 토지, 건물, 제시외건물 순서로 정리됩니다.");
+            empty.setText("촬영한 사진이 토지, 건물, 제시외건물, 기타 순서로 정리됩니다.");
             empty.setGravity(Gravity.CENTER);
             empty.setTextColor(Color.rgb(104, 112, 125));
             listContainer.addView(empty, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(180)));
@@ -1184,7 +1239,7 @@ public class MainActivity extends ComponentActivity {
         card.addView(imageFrame, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(210)));
 
         TextView title = new TextView(this);
-        title.setText(categoryLabel(photo.category) + " 기호 " + photo.symbol);
+        title.setText(photoTitle(photo));
         title.setTextSize(16);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(Color.rgb(21, 23, 26));
@@ -1259,7 +1314,11 @@ public class MainActivity extends ComponentActivity {
             return (baseRank < 0 ? 99 : baseRank) * 100 + subRank;
         }
 
-        return indexOf(EXTRA_SYMBOLS, photo.symbol);
+        if (CATEGORY_EXTRA.equals(photo.category)) {
+            return indexOf(EXTRA_SYMBOLS, photo.symbol);
+        }
+
+        return 0;
     }
 
     private void confirmClear() {
@@ -1642,7 +1701,11 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void rememberCurrentSelection() {
-        if (symbolSpinner != null && symbolSpinner.getAdapter() != null) {
+        if (CATEGORY_CUSTOM.equals(currentCategory)) {
+            if (customSymbolInput != null) {
+                currentSymbol = customSymbolInput.getText().toString().trim();
+            }
+        } else if (symbolSpinner != null && symbolSpinner.getAdapter() != null) {
             String[] symbols = symbolsForCategory(currentCategory);
             int position = symbolSpinner.getSelectedItemPosition();
             if (position >= 0 && position < symbols.length) {
@@ -1650,12 +1713,14 @@ public class MainActivity extends ComponentActivity {
             }
         }
 
-        if (buildingSubSpinner != null && buildingSubSpinner.getAdapter() != null) {
+        if (CATEGORY_BUILDING.equals(currentCategory) && buildingSubSpinner != null && buildingSubSpinner.getAdapter() != null) {
             int position = buildingSubSpinner.getSelectedItemPosition();
             if (position >= 0 && position < BUILDING_SUB_SYMBOLS.length) {
                 String sub = BUILDING_SUB_SYMBOLS[position];
                 currentBuildingSub = "없음".equals(sub) ? "" : sub;
             }
+        } else {
+            currentBuildingSub = "";
         }
 
         if (memoInput != null) {
@@ -1701,6 +1766,7 @@ public class MainActivity extends ComponentActivity {
     private String categoryLabel(String category) {
         if (CATEGORY_LAND.equals(category)) return "토지";
         if (CATEGORY_BUILDING.equals(category)) return "건물";
+        if (CATEGORY_CUSTOM.equals(category)) return "기타";
         return "제시외건물";
     }
 
@@ -1718,6 +1784,13 @@ public class MainActivity extends ComponentActivity {
 
     private String photoCaption(PhotoItem photo) {
         if (!photo.memo.isEmpty()) return photo.memo;
+        return photoTitle(photo);
+    }
+
+    private String photoTitle(PhotoItem photo) {
+        if (CATEGORY_CUSTOM.equals(photo.category)) {
+            return "기타사항: " + photo.symbol;
+        }
         return categoryLabel(photo.category) + " 기호 " + photo.symbol;
     }
 
