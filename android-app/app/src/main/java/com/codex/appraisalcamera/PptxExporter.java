@@ -184,7 +184,9 @@ final class PptxExporter {
             FitRect fit = fitInside(item.photo, PHOTO_X, y, PHOTO_W, PHOTO_H);
             xml.append(frameRect(id++, PHOTO_X, y, PHOTO_W, PHOTO_H));
             xml.append(picture(id++, item.relationshipId, item.imageName, fit.x, fit.y, fit.w, fit.h));
-            xml.append(stampBox(id++, item.photo.stamp, fit.x + fit.w - emu(116), fit.y + fit.h - emu(24), emu(108), emu(17)));
+            if (item.photo.stamp != null && !item.photo.stamp.isEmpty()) {
+                xml.append(stampBox(id++, item.photo.stamp, fit.x + fit.w - emu(116), fit.y + fit.h - emu(24), emu(108), emu(17)));
+            }
             xml.append(textShape(id++, item.photo.caption, emu(80), y + PHOTO_H + emu(22), emu(435), emu(25), 1100, false, "ctr"));
         }
         xml.append(textShape(id, "Page : " + pageNumber, emu(455), emu(805), emu(120), emu(20), 1000, false, "r"));

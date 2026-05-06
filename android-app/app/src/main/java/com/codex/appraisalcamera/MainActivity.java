@@ -3,6 +3,7 @@ package com.codex.appraisalcamera;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Intent;
@@ -82,8 +83,14 @@ public class MainActivity extends ComponentActivity {
     private static final String PREF_PHOTOS = "photos";
     private static final String PREF_ADDRESS = "property_address";
     private static final String PREF_EMAIL = "email_recipient";
+    private static final String PREF_MAIL_APP = "mail_app";
     private static final String PREF_GUIDE_ALPHA = "guide_alpha_percent";
     private static final String PREF_GUIDE_SCALE = "guide_scale_percent";
+    private static final String MAIL_APP_CHOOSER = "chooser";
+    private static final String MAIL_APP_GMAIL = "gmail";
+    private static final String MAIL_APP_NAVER = "naver";
+    private static final String GMAIL_PACKAGE = "com.google.android.gm";
+    private static final String NAVER_MAIL_PACKAGE = "com.nhn.android.mail";
 
     private static final String CATEGORY_LAND = "land";
     private static final String CATEGORY_BUILDING = "building";
@@ -166,7 +173,7 @@ public class MainActivity extends ComponentActivity {
             header.addView(secondToolbarRow, secondRowParams);
         }
 
-        Button addressButton = smallButton("주소");
+        Button addressButton = smallButton("물건지");
         addressButton.setOnClickListener(v -> showAddressDialog());
 
         Button pptxButton = smallButton("PPTX");
@@ -431,7 +438,7 @@ public class MainActivity extends ComponentActivity {
                 .setPositiveButton("저장", (dialog, which) -> {
                     propertyAddress = input.getText().toString().trim();
                     savePropertyAddress();
-                    Toast.makeText(this, "주소가 저장되었습니다.", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "물건지 주소가 저장되었습니다.", Toast.LENGTH_SHORT).show();
                 })
                 .show();
     }
@@ -500,6 +507,23 @@ public class MainActivity extends ComponentActivity {
         emailButtonParams.bottomMargin = dp(12);
         content.addView(emailSettingsButton, emailButtonParams);
 
+        TextView mailAppLabel = settingLabel("기본 메일 앱");
+        content.addView(mailAppLabel);
+        TextView mailAppValue = new TextView(this);
+        mailAppValue.setText(mailAppLabel(getSavedMailApp()));
+        mailAppValue.setTextSize(13);
+        mailAppValue.setTextColor(Color.rgb(82, 91, 105));
+        LinearLayout.LayoutParams mailAppValueParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mailAppValueParams.topMargin = dp(3);
+        content.addView(mailAppValue, mailAppValueParams);
+
+        Button mailAppSettingsButton = secondaryButton("메일 앱 설정");
+        mailAppSettingsButton.setOnClickListener(v -> showMailAppDialog());
+        LinearLayout.LayoutParams mailAppButtonParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36));
+        mailAppButtonParams.topMargin = dp(6);
+        mailAppButtonParams.bottomMargin = dp(12);
+        content.addView(mailAppSettingsButton, mailAppButtonParams);
+
         TextView alphaLabel = settingLabel("배경 불투명도 " + guideAlphaPercent + "%");
         content.addView(alphaLabel);
         SeekBar alphaSeek = new SeekBar(this);
@@ -561,6 +585,22 @@ public class MainActivity extends ComponentActivity {
                     applyGuideAppearance();
                 })
                 .setPositiveButton("닫기", null)
+                .show();
+    }
+
+    private void showMailAppDialog() {
+        String[] labels = {"앱 선택", "Gmail", "네이버 메일"};
+        String[] values = {MAIL_APP_CHOOSER, MAIL_APP_GMAIL, MAIL_APP_NAVER};
+        int checked = indexOf(values, getSavedMailApp());
+
+        new AlertDialog.Builder(this)
+                .setTitle("기본 메일 앱")
+                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                    saveMailApp(values[which]);
+                    Toast.makeText(this, labels[which] + "로 설정했습니다.", Toast.LENGTH_SHORT).show();
+                    dialog.dismiss();
+                })
+                .setNegativeButton("취소", null)
                 .show();
     }
 
@@ -895,10 +935,14 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void addPhoto(String uri) {
-        addPhoto(uri, System.currentTimeMillis());
+        addPhoto(uri, System.currentTimeMillis(), false);
     }
 
     private void addPhoto(String uri, long createdAt) {
+        addPhoto(uri, createdAt, true);
+    }
+
+    private void addPhoto(String uri, long createdAt, boolean stamped) {
         String symbol = selectedSymbol();
         PhotoItem item = new PhotoItem();
         item.id = String.valueOf(createdAt) + "-" + Math.round(Math.random() * 100000);
@@ -907,6 +951,7 @@ public class MainActivity extends ComponentActivity {
         item.memo = memoInput.getText().toString().trim();
         item.uri = uri;
         item.createdAt = createdAt;
+        item.stamped = stamped;
         photos.add(item);
 
         memoInput.setText("");
@@ -992,17 +1037,20 @@ public class MainActivity extends ComponentActivity {
         image.setImageURI(Uri.parse(photo.uri));
         imageFrame.addView(image, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        TextView stamp = new TextView(this);
-        stamp.setText(photoStamp(photo));
-        stamp.setTextColor(Color.WHITE);
-        stamp.setTextSize(11);
-        stamp.setGravity(Gravity.RIGHT);
-        stamp.setPadding(dp(7), dp(4), dp(7), dp(4));
-        stamp.setBackgroundColor(Color.argb(175, 0, 0, 0));
-        FrameLayout.LayoutParams stampParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        stampParams.gravity = Gravity.BOTTOM | Gravity.RIGHT;
-        stampParams.setMargins(dp(8), dp(8), dp(8), dp(8));
-        imageFrame.addView(stamp, stampParams);
+        String stampText = displayPhotoStamp(photo);
+        if (!stampText.isEmpty()) {
+            TextView stamp = new TextView(this);
+            stamp.setText(stampText);
+            stamp.setTextColor(Color.WHITE);
+            stamp.setTextSize(11);
+            stamp.setGravity(Gravity.RIGHT);
+            stamp.setPadding(dp(7), dp(4), dp(7), dp(4));
+            stamp.setBackgroundColor(Color.argb(175, 0, 0, 0));
+            FrameLayout.LayoutParams stampParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            stampParams.gravity = Gravity.BOTTOM | Gravity.RIGHT;
+            stampParams.setMargins(dp(8), dp(8), dp(8), dp(8));
+            imageFrame.addView(stamp, stampParams);
+        }
 
         card.addView(imageFrame, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(210)));
 
@@ -1150,7 +1198,7 @@ public class MainActivity extends ComponentActivity {
             exportPhotos.add(new PptxExporter.PhotoData(
                     Uri.parse(photo.uri),
                     photoCaption(photo),
-                    photoStamp(photo)
+                    displayPhotoStamp(photo)
             ));
         }
         return PptxExporter.create(this, exportPhotos, documentHeaderText());
@@ -1188,10 +1236,15 @@ public class MainActivity extends ComponentActivity {
             emailIntent.putExtra(Intent.EXTRA_STREAM, attachmentUri);
             emailIntent.setClipData(ClipData.newUri(getContentResolver(), "사진자료 PPTX", attachmentUri));
             emailIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            Intent mailSelector = new Intent(Intent.ACTION_SENDTO);
-            mailSelector.setData(Uri.parse("mailto:"));
-            emailIntent.setSelector(mailSelector);
-            startActivity(Intent.createChooser(emailIntent, "메일 앱 선택"));
+            String mailPackage = selectedMailPackage();
+            if (!mailPackage.isEmpty()) {
+                emailIntent.setPackage(mailPackage);
+                startActivity(emailIntent);
+            } else {
+                startActivity(Intent.createChooser(emailIntent, "메일 앱 선택"));
+            }
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, "선택한 메일 앱을 찾을 수 없습니다. 설정에서 메일 앱을 변경해주세요.", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
             Toast.makeText(this, "메일 발송 화면을 열 수 없습니다.", Toast.LENGTH_LONG).show();
         }
@@ -1217,6 +1270,27 @@ public class MainActivity extends ComponentActivity {
 
     private void saveEmailRecipient(String recipient) {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_EMAIL, recipient.trim()).apply();
+    }
+
+    private String getSavedMailApp() {
+        return getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_MAIL_APP, MAIL_APP_CHOOSER);
+    }
+
+    private void saveMailApp(String mailApp) {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_MAIL_APP, mailApp).apply();
+    }
+
+    private String selectedMailPackage() {
+        String mailApp = getSavedMailApp();
+        if (MAIL_APP_GMAIL.equals(mailApp)) return GMAIL_PACKAGE;
+        if (MAIL_APP_NAVER.equals(mailApp)) return NAVER_MAIL_PACKAGE;
+        return "";
+    }
+
+    private String mailAppLabel(String mailApp) {
+        if (MAIL_APP_GMAIL.equals(mailApp)) return "Gmail";
+        if (MAIL_APP_NAVER.equals(mailApp)) return "네이버 메일";
+        return "앱 선택";
     }
 
     private String buildPrintHtml() {
@@ -1260,7 +1334,10 @@ public class MainActivity extends ComponentActivity {
         html.append("<article class='card ").append(top ? "top" : "bottom").append("'>");
         html.append("<div class='frame'>");
         html.append("<img src='").append(escapeHtml(photo.uri)).append("'>");
-        html.append("<div class='stamp'>").append(escapeHtml(photoStamp(photo)).replace("\n", "<br>")).append("</div>");
+        String stampText = displayPhotoStamp(photo);
+        if (!stampText.isEmpty()) {
+            html.append("<div class='stamp'>").append(escapeHtml(stampText).replace("\n", "<br>")).append("</div>");
+        }
         html.append("</div>");
         html.append("<div class='caption'>").append(escapeHtml(photoCaption(photo))).append("</div>");
         html.append("</article>");
@@ -1281,6 +1358,7 @@ public class MainActivity extends ComponentActivity {
                 item.memo = object.optString("memo");
                 item.uri = object.optString("uri");
                 item.createdAt = object.optLong("createdAt", System.currentTimeMillis());
+                item.stamped = object.optBoolean("stamped", true);
                 if (!item.uri.isEmpty()) photos.add(item);
             }
         } catch (JSONException ignored) {
@@ -1321,6 +1399,7 @@ public class MainActivity extends ComponentActivity {
                 object.put("memo", item.memo);
                 object.put("uri", item.uri);
                 object.put("createdAt", item.createdAt);
+                object.put("stamped", item.stamped);
                 array.put(object);
             } catch (JSONException ignored) {
                 // JSONObject with string values should not fail in normal use.
@@ -1341,6 +1420,10 @@ public class MainActivity extends ComponentActivity {
 
     private String photoStamp(PhotoItem photo) {
         return "촬영: " + formatDate(photo.createdAt);
+    }
+
+    private String displayPhotoStamp(PhotoItem photo) {
+        return photo.stamped ? "" : photoStamp(photo);
     }
 
     private String photoCaption(PhotoItem photo) {
@@ -1396,5 +1479,6 @@ public class MainActivity extends ComponentActivity {
         String memo;
         String uri;
         long createdAt;
+        boolean stamped;
     }
 }
