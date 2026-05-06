@@ -3,6 +3,7 @@ package com.codex.appraisalcamera;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.AlertDialog;
+import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -55,9 +56,12 @@ import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 
 import com.google.common.util.concurrent.ListenableFuture;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -77,6 +81,7 @@ public class MainActivity extends ComponentActivity {
     private static final String PREFS = "appraisal_photos";
     private static final String PREF_PHOTOS = "photos";
     private static final String PREF_ADDRESS = "property_address";
+    private static final String PREF_EMAIL = "email_recipient";
     private static final String PREF_GUIDE_ALPHA = "guide_alpha_percent";
     private static final String PREF_GUIDE_SCALE = "guide_scale_percent";
 
@@ -167,6 +172,9 @@ public class MainActivity extends ComponentActivity {
         Button pptxButton = smallButton("PPTX");
         pptxButton.setOnClickListener(v -> exportPptx());
 
+        Button emailButton = smallButton("메일");
+        emailButton.setOnClickListener(v -> showEmailDialog());
+
         Button listButton = smallButton("목록");
         listButton.setOnClickListener(v -> showPhotoListDialog());
 
@@ -179,12 +187,14 @@ public class MainActivity extends ComponentActivity {
         if (portrait) {
             addToolbarButton(firstToolbarRow, addressButton, false);
             addToolbarButton(firstToolbarRow, pptxButton, false);
-            addToolbarButton(firstToolbarRow, listButton, false);
+            addToolbarButton(firstToolbarRow, emailButton, false);
+            addToolbarButton(secondToolbarRow, listButton, false);
             addToolbarButton(secondToolbarRow, clearButton, false);
             addToolbarButton(secondToolbarRow, settingsButton, false);
         } else {
             addToolbarButton(header, addressButton, true);
             addToolbarButton(header, pptxButton, true);
+            addToolbarButton(header, emailButton, true);
             addToolbarButton(header, listButton, true);
             addToolbarButton(header, clearButton, true);
             addToolbarButton(header, settingsButton, true);
@@ -422,6 +432,37 @@ public class MainActivity extends ComponentActivity {
                     propertyAddress = input.getText().toString().trim();
                     savePropertyAddress();
                     Toast.makeText(this, "주소가 저장되었습니다.", Toast.LENGTH_SHORT).show();
+                })
+                .show();
+    }
+
+    private void showEmailDialog() {
+        if (photos.isEmpty()) {
+            Toast.makeText(this, "발송할 사진이 없습니다.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("받는 메일주소");
+        input.setText(getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_EMAIL, ""));
+        input.setSelectAllOnFocus(false);
+        input.setTextSize(14);
+        input.setPadding(dp(10), 0, dp(10), 0);
+        input.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
+
+        new AlertDialog.Builder(this)
+                .setTitle("PPTX 메일 발송")
+                .setView(input)
+                .setNegativeButton("취소", null)
+                .setPositiveButton("메일 열기", (dialog, which) -> {
+                    String recipient = input.getText().toString().trim();
+                    if (!recipient.contains("@")) {
+                        Toast.makeText(this, "메일주소를 확인해주세요.", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_EMAIL, recipient).apply();
+                    sendPptxEmail(recipient);
                 })
                 .show();
     }
@@ -1061,26 +1102,71 @@ public class MainActivity extends ComponentActivity {
         }
 
         try {
-            ArrayList<PptxExporter.PhotoData> exportPhotos = new ArrayList<>();
-            for (PhotoItem photo : sortedPhotos()) {
-                exportPhotos.add(new PptxExporter.PhotoData(
-                        Uri.parse(photo.uri),
-                        photoCaption(photo),
-                        photoStamp(photo)
-                ));
-            }
-            pendingPptxBytes = PptxExporter.create(this, exportPhotos, documentHeaderText());
+            pendingPptxBytes = createPptxBytes();
         } catch (IOException e) {
             Toast.makeText(this, "PPTX 파일을 만들 수 없습니다.", Toast.LENGTH_LONG).show();
             return;
         }
 
-        String fileName = "자체감정_사진자료_" + new SimpleDateFormat("yyyyMMdd_HHmm", Locale.KOREA).format(new Date()) + ".pptx";
+        String fileName = pptxFileName();
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/vnd.openxmlformats-officedocument.presentationml.presentation");
         intent.putExtra(Intent.EXTRA_TITLE, fileName);
         startActivityForResult(intent, REQUEST_CREATE_PPTX);
+    }
+
+    private byte[] createPptxBytes() throws IOException {
+        ArrayList<PptxExporter.PhotoData> exportPhotos = new ArrayList<>();
+        for (PhotoItem photo : sortedPhotos()) {
+            exportPhotos.add(new PptxExporter.PhotoData(
+                    Uri.parse(photo.uri),
+                    photoCaption(photo),
+                    photoStamp(photo)
+            ));
+        }
+        return PptxExporter.create(this, exportPhotos, documentHeaderText());
+    }
+
+    private String pptxFileName() {
+        return "자체감정_사진자료_" + new SimpleDateFormat("yyyyMMdd_HHmm", Locale.KOREA).format(new Date()) + ".pptx";
+    }
+
+    private void sendPptxEmail(String recipient) {
+        try {
+            byte[] pptxBytes = createPptxBytes();
+            File exportDir = new File(getCacheDir(), "mail_exports");
+            if (!exportDir.exists() && !exportDir.mkdirs()) {
+                throw new IOException("Cannot create mail export directory");
+            }
+            File[] oldFiles = exportDir.listFiles();
+            if (oldFiles != null) {
+                for (File oldFile : oldFiles) {
+                    oldFile.delete();
+                }
+            }
+
+            File pptxFile = new File(exportDir, pptxFileName());
+            try (FileOutputStream output = new FileOutputStream(pptxFile)) {
+                output.write(pptxBytes);
+            }
+
+            Uri attachmentUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", pptxFile);
+            Intent emailIntent = new Intent(Intent.ACTION_SEND);
+            emailIntent.setType("application/vnd.openxmlformats-officedocument.presentationml.presentation");
+            emailIntent.putExtra(Intent.EXTRA_EMAIL, new String[]{recipient});
+            emailIntent.putExtra(Intent.EXTRA_SUBJECT, documentHeaderText() + " 사진자료");
+            emailIntent.putExtra(Intent.EXTRA_TEXT, "사진자료 PPTX 파일을 첨부합니다.");
+            emailIntent.putExtra(Intent.EXTRA_STREAM, attachmentUri);
+            emailIntent.setClipData(ClipData.newUri(getContentResolver(), "사진자료 PPTX", attachmentUri));
+            emailIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            Intent mailSelector = new Intent(Intent.ACTION_SENDTO);
+            mailSelector.setData(Uri.parse("mailto:"));
+            emailIntent.setSelector(mailSelector);
+            startActivity(Intent.createChooser(emailIntent, "메일 앱 선택"));
+        } catch (Exception e) {
+            Toast.makeText(this, "메일 발송 화면을 열 수 없습니다.", Toast.LENGTH_LONG).show();
+        }
     }
 
     private void writePendingPptx(Uri uri) {
