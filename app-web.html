@@ -1,0 +1,917 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>자체감정 카메라 Web</title>
+  <style>
+    :root {
+      --ink: #171a1f;
+      --muted: #65707d;
+      --line: #d8dee6;
+      --panel: rgba(255, 255, 255, .88);
+      --accent: #116779;
+      --danger: #a3451d;
+      --bg: #05070a;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      overflow: hidden;
+    }
+
+    button, input, select { font: inherit; }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f7f9fb;
+      color: var(--ink);
+      font-weight: 700;
+      min-height: 38px;
+      padding: 0 10px;
+    }
+    button.primary {
+      background: var(--accent);
+      border-color: #0d5564;
+      color: #fff;
+    }
+    button.danger { color: var(--danger); }
+    input, select {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      height: 38px;
+      padding: 0 10px;
+      background: #fff;
+      min-width: 0;
+    }
+
+    .app {
+      position: fixed;
+      inset: 0;
+      background: #000;
+    }
+    video, .fallback {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+    .fallback {
+      display: grid;
+      place-items: center;
+      color: #fff;
+      text-align: center;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    canvas { display: none; }
+
+    .topbar {
+      position: absolute;
+      z-index: 5;
+      top: max(10px, env(safe-area-inset-top));
+      left: max(10px, env(safe-area-inset-left));
+      right: max(10px, env(safe-area-inset-right));
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 6px;
+      padding: 7px;
+      border-radius: 10px;
+      background: rgba(9, 14, 18, .68);
+    }
+    .topbar button { min-width: 58px; min-height: 34px; font-size: 12px; padding: 0 8px; }
+
+    .guide {
+      position: absolute;
+      z-index: 4;
+      left: 10px;
+      right: 10px;
+      bottom: max(10px, env(safe-area-inset-bottom));
+      margin: 0 auto;
+      max-width: 520px;
+      padding: 8px;
+      border: 1px solid rgba(204, 212, 222, .75);
+      border-radius: 12px;
+      background: var(--panel);
+      transform-origin: bottom center;
+    }
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 5px;
+    }
+    .tab {
+      height: 34px;
+      font-size: 12px;
+      padding: 0 4px;
+      color: #47505b;
+    }
+    .tab.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .row { display: flex; gap: 6px; margin-top: 6px; }
+    .row > * { flex: 1 1 0; }
+    #buildingSub { flex: 0 0 86px; display: none; }
+    #customInput { display: none; }
+    .count {
+      margin-top: 4px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 12px;
+    }
+
+    .drawer {
+      position: fixed;
+      z-index: 10;
+      inset: auto 0 0 0;
+      max-height: 78vh;
+      overflow: auto;
+      padding: 14px;
+      border-radius: 16px 16px 0 0;
+      background: #f6f7f9;
+      transform: translateY(105%);
+      transition: transform .2s ease;
+      box-shadow: 0 -18px 45px rgba(0, 0, 0, .25);
+    }
+    .drawer.open { transform: translateY(0); }
+    .drawer-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .drawer h2 { margin: 0; font-size: 18px; }
+    .cards { display: grid; gap: 10px; }
+    .card {
+      background: #fff;
+      border: 1px solid #e4e8ef;
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .card img {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: cover;
+      background: #eee;
+      display: block;
+    }
+    .card-title { margin-top: 8px; font-weight: 800; }
+    .card-meta { margin-top: 2px; color: var(--muted); font-size: 13px; }
+    .card button { width: 100%; margin-top: 8px; }
+
+    .sheet {
+      position: fixed;
+      z-index: 20;
+      inset: 0;
+      overflow: auto;
+      background: #f3f4f6;
+      padding: 18px;
+      transform: translateX(105%);
+      transition: transform .22s ease;
+    }
+    .sheet.open { transform: translateX(0); }
+    .sheet-actions {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding-bottom: 12px;
+      background: #f3f4f6;
+    }
+    .page {
+      width: min(100%, 794px);
+      min-height: 1123px;
+      margin: 0 auto 18px;
+      padding: 42px 54px 36px;
+      background: #fff;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, .12);
+      position: relative;
+    }
+    .doc-head { font-size: 15px; margin-bottom: 22px; }
+    .doc-title { text-align: center; font-size: 26px; font-weight: 800; letter-spacing: 8px; margin-bottom: 28px; }
+    .photo-slot { margin-bottom: 44px; }
+    .photo-box {
+      position: relative;
+      width: 100%;
+      height: 365px;
+      border: 1px solid #333;
+      overflow: hidden;
+      background: #f1f1f1;
+    }
+    .photo-box img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .stamp {
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      padding: 5px 8px;
+      color: #fff;
+      background: rgba(0, 0, 0, .68);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .caption { margin-top: 8px; text-align: center; font-size: 16px; }
+    .page-no { position: absolute; right: 54px; bottom: 24px; font-size: 14px; }
+
+    @media (orientation: landscape) {
+      .topbar {
+        right: auto;
+        bottom: max(10px, env(safe-area-inset-bottom));
+        width: 112px;
+        flex-direction: column;
+        align-content: stretch;
+      }
+      .topbar button { width: 100%; }
+      .guide {
+        left: auto;
+        right: max(10px, env(safe-area-inset-right));
+        top: 50%;
+        bottom: auto;
+        width: min(32vw, 320px);
+        transform: translateY(-50%);
+      }
+    }
+
+    @media print {
+      body { overflow: visible; background: #fff; }
+      .app, .drawer, .sheet-actions { display: none !important; }
+      .sheet { position: static; transform: none; padding: 0; background: #fff; overflow: visible; }
+      .page { width: 210mm; min-height: 297mm; margin: 0; box-shadow: none; page-break-after: always; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <video id="video" playsinline autoplay muted></video>
+    <div id="fallback" class="fallback" hidden>
+      <div>
+        실시간 카메라는 HTTPS 또는 localhost에서 작동합니다.<br>
+        아래의 사진 촬영/선택 버튼으로도 사용할 수 있습니다.
+      </div>
+    </div>
+    <canvas id="captureCanvas"></canvas>
+    <input id="fileInput" type="file" accept="image/*" capture="environment" hidden>
+
+    <nav class="topbar">
+      <button id="addressBtn">물건지</button>
+      <button id="pptxBtn">PPTX</button>
+      <button id="previewBtn">자료</button>
+      <button id="listBtn">목록</button>
+      <button id="clearBtn" class="danger">전체삭제</button>
+    </nav>
+
+    <section class="guide" id="guide">
+      <div class="tabs">
+        <button class="tab active" data-category="land">토지</button>
+        <button class="tab" data-category="building">건물</button>
+        <button class="tab" data-category="extra">제시외</button>
+        <button class="tab" data-category="custom">기타</button>
+      </div>
+      <div class="row">
+        <select id="symbolSelect"></select>
+        <select id="buildingSub"></select>
+        <input id="customInput" type="text" placeholder="기타사항 입력">
+      </div>
+      <div class="row">
+        <input id="memoInput" type="text" placeholder="사진 설명: 전경, 진입로, 외벽, 내부">
+      </div>
+      <div class="row">
+        <button id="captureBtn" class="primary">촬영</button>
+        <button id="pickBtn">사진 촬영/선택</button>
+      </div>
+      <div id="count" class="count">등록된 사진 0장</div>
+    </section>
+  </main>
+
+  <aside id="drawer" class="drawer">
+    <div class="drawer-head">
+      <h2>등록된 사진</h2>
+      <button id="closeListBtn">닫기</button>
+    </div>
+    <div id="cards" class="cards"></div>
+  </aside>
+
+  <section id="sheet" class="sheet">
+    <div class="sheet-actions">
+      <button id="printBtn">인쇄/PDF</button>
+      <button id="closeSheetBtn">닫기</button>
+    </div>
+    <div id="pages"></div>
+  </section>
+
+  <script>
+    const CATEGORIES = {
+      land: { label: "토지", symbols: Array.from({ length: 99 }, (_, i) => String(i + 1)) },
+      building: { label: "건물", symbols: ["가", "나", "다", "라", "마", "바", "사", "아", "자", "차", "카", "타", "파", "하"] },
+      extra: { label: "제시외건물", symbols: ["ㄱ", "ㄴ", "ㄷ", "ㄹ", "ㅁ", "ㅂ", "ㅅ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"] },
+      custom: { label: "기타", symbols: [] }
+    };
+    const ORDER = ["land", "building", "extra", "custom"];
+    const BUILDING_SUBS = ["없음", "-1", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9"];
+    const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+    const state = {
+      address: localStorage.getItem("appraisal.web.address") || "",
+      category: localStorage.getItem("appraisal.web.category") || "land",
+      symbol: localStorage.getItem("appraisal.web.symbol") || "",
+      buildingSub: localStorage.getItem("appraisal.web.buildingSub") || "",
+      custom: localStorage.getItem("appraisal.web.custom") || "",
+      memo: "",
+      photos: []
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const video = $("video");
+    const canvas = $("captureCanvas");
+    const symbolSelect = $("symbolSelect");
+    const buildingSub = $("buildingSub");
+    const customInput = $("customInput");
+    const memoInput = $("memoInput");
+
+    let db;
+    openDb().then(async database => {
+      db = database;
+      state.photos = await readAllPhotos();
+      bindEvents();
+      renderControls();
+      renderCount();
+      startCamera();
+    });
+
+    function bindEvents() {
+      document.querySelectorAll(".tab").forEach(button => {
+        button.addEventListener("click", () => {
+          state.category = button.dataset.category;
+          state.symbol = "";
+          state.buildingSub = "";
+          saveControlState();
+          renderControls();
+        });
+      });
+      symbolSelect.addEventListener("change", () => {
+        state.symbol = symbolSelect.value;
+        saveControlState();
+      });
+      buildingSub.addEventListener("change", () => {
+        state.buildingSub = buildingSub.value === "없음" ? "" : buildingSub.value;
+        saveControlState();
+      });
+      customInput.addEventListener("input", () => {
+        state.custom = customInput.value.trim();
+        state.symbol = state.custom;
+        localStorage.setItem("appraisal.web.custom", state.custom);
+        saveControlState();
+      });
+      memoInput.addEventListener("input", () => state.memo = memoInput.value.trim());
+      $("captureBtn").addEventListener("click", captureFromVideo);
+      $("pickBtn").addEventListener("click", () => $("fileInput").click());
+      $("fileInput").addEventListener("change", handlePickedFile);
+      $("addressBtn").addEventListener("click", editAddress);
+      $("listBtn").addEventListener("click", openList);
+      $("closeListBtn").addEventListener("click", () => $("drawer").classList.remove("open"));
+      $("previewBtn").addEventListener("click", openSheet);
+      $("closeSheetBtn").addEventListener("click", () => $("sheet").classList.remove("open"));
+      $("printBtn").addEventListener("click", () => window.print());
+      $("pptxBtn").addEventListener("click", exportPptx);
+      $("clearBtn").addEventListener("click", clearAll);
+    }
+
+    async function startCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        $("fallback").hidden = false;
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: false
+        });
+        video.srcObject = stream;
+        $("fallback").hidden = true;
+      } catch {
+        $("fallback").hidden = false;
+      }
+    }
+
+    function renderControls() {
+      document.querySelectorAll(".tab").forEach(button => {
+        button.classList.toggle("active", button.dataset.category === state.category);
+      });
+
+      const custom = state.category === "custom";
+      symbolSelect.style.display = custom ? "none" : "";
+      buildingSub.style.display = state.category === "building" ? "" : "none";
+      customInput.style.display = custom ? "" : "none";
+      customInput.value = state.custom;
+
+      if (!custom) {
+        const symbols = CATEGORIES[state.category].symbols;
+        symbolSelect.innerHTML = symbols.map(symbol => `<option value="${escapeHtml(symbol)}">${CATEGORIES[state.category].label} 기호 ${escapeHtml(symbol)}</option>`).join("");
+        const next = nextSymbol(state.category);
+        symbolSelect.value = state.symbol || next.base;
+        state.symbol = symbolSelect.value;
+      }
+
+      buildingSub.innerHTML = BUILDING_SUBS.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("");
+      buildingSub.value = state.buildingSub || "없음";
+      saveControlState();
+    }
+
+    function selectedSymbol() {
+      if (state.category === "custom") {
+        const value = customInput.value.trim();
+        return value || "기타사항";
+      }
+      const base = symbolSelect.value;
+      if (state.category !== "building") return base;
+      const sub = buildingSub.value === "없음" ? "" : buildingSub.value;
+      return base + sub;
+    }
+
+    async function captureFromVideo() {
+      if (!video.videoWidth || !video.videoHeight) {
+        $("fileInput").click();
+        return;
+      }
+      const blob = await imageBlobFromVideo();
+      await addPhoto(blob);
+    }
+
+    async function handlePickedFile(event) {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = "";
+      if (!file) return;
+      const blob = await normalizeImageBlob(file);
+      await addPhoto(blob);
+    }
+
+    async function addPhoto(blob) {
+      const createdAt = Date.now();
+      const symbol = selectedSymbol();
+      const photo = {
+        id: `${createdAt}-${Math.round(Math.random() * 100000)}`,
+        category: state.category,
+        symbol,
+        memo: state.memo,
+        createdAt,
+        image: await blobToDataUrl(blob)
+      };
+      await putPhoto(photo);
+      state.photos.push(photo);
+      memoInput.value = "";
+      state.memo = "";
+      if (state.category !== "custom") {
+        state.symbol = "";
+      } else {
+        state.custom = customInput.value.trim();
+        state.symbol = state.custom;
+      }
+      saveControlState();
+      renderControls();
+      renderCount();
+    }
+
+    async function imageBlobFromVideo() {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0);
+      drawStamp(ctx, canvas.width, canvas.height, stampText(Date.now()));
+      return new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", .9));
+    }
+
+    async function normalizeImageBlob(file) {
+      const img = await loadImage(URL.createObjectURL(file));
+      const maxSide = 1800;
+      const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      drawStamp(ctx, canvas.width, canvas.height, stampText(Date.now()));
+      return new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", .88));
+    }
+
+    function drawStamp(ctx, width, height, text) {
+      const size = Math.max(26, width * .026);
+      ctx.font = `700 ${size}px system-ui, sans-serif`;
+      const metrics = ctx.measureText(text);
+      const padX = size * .55;
+      const padY = size * .35;
+      const boxW = metrics.width + padX * 2;
+      const boxH = size + padY * 2;
+      const left = width - boxW - size * .55;
+      const top = height - boxH - size * .55;
+      ctx.fillStyle = "rgba(0,0,0,.68)";
+      ctx.fillRect(left, top, boxW, boxH);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(text, left + padX, top + padY + size * .78);
+    }
+
+    function sortedPhotos() {
+      return [...state.photos].sort((a, b) => {
+        const c = ORDER.indexOf(a.category) - ORDER.indexOf(b.category);
+        if (c) return c;
+        const s = symbolRank(a) - symbolRank(b);
+        if (s) return s;
+        return a.createdAt - b.createdAt;
+      });
+    }
+
+    function symbolRank(photo) {
+      if (photo.category === "land") return Number.parseInt(photo.symbol, 10) || 9999;
+      if (photo.category === "building") {
+        const [base, sub] = photo.symbol.split("-");
+        const baseRank = CATEGORIES.building.symbols.indexOf(base);
+        return (baseRank < 0 ? 99 : baseRank) * 100 + (sub ? Number.parseInt(sub, 10) || 99 : 0);
+      }
+      if (photo.category === "extra") return CATEGORIES.extra.symbols.indexOf(photo.symbol);
+      return 0;
+    }
+
+    function nextSymbol(category) {
+      const used = new Set(state.photos.filter(photo => photo.category === category).map(photo => photo.symbol));
+      if (category === "building") {
+        for (const symbol of CATEGORIES.building.symbols) {
+          if (!used.has(symbol)) return { base: symbol, sub: "" };
+        }
+        return { base: "하", sub: "-1" };
+      }
+      for (const symbol of CATEGORIES[category].symbols) {
+        if (!used.has(symbol)) return { base: symbol, sub: "" };
+      }
+      const fallback = CATEGORIES[category].symbols.at(-1) || "";
+      return { base: fallback, sub: "" };
+    }
+
+    function openList() {
+      const cards = $("cards");
+      const photos = sortedPhotos();
+      cards.innerHTML = photos.length ? photos.map(photo => `
+        <article class="card">
+          <img src="${photo.image}" alt="">
+          <div class="card-title">${escapeHtml(photoTitle(photo))}</div>
+          <div class="card-meta">${escapeHtml(photo.memo || formatDate(photo.createdAt))}</div>
+          <button class="danger" data-delete="${photo.id}">삭제</button>
+        </article>
+      `).join("") : `<div class="card">등록된 사진이 없습니다.</div>`;
+      cards.querySelectorAll("[data-delete]").forEach(button => {
+        button.addEventListener("click", async () => {
+          await deletePhoto(button.dataset.delete);
+          state.photos = state.photos.filter(photo => photo.id !== button.dataset.delete);
+          renderCount();
+          openList();
+        });
+      });
+      $("drawer").classList.add("open");
+    }
+
+    function openSheet() {
+      renderPages();
+      $("sheet").classList.add("open");
+    }
+
+    function renderPages() {
+      const photos = sortedPhotos();
+      const pages = [];
+      for (let i = 0; i < photos.length; i += 2) pages.push(photos.slice(i, i + 2));
+      $("pages").innerHTML = pages.length ? pages.map((items, index) => `
+        <section class="page">
+          <div class="doc-head">${escapeHtml(documentHeader())}</div>
+          <div class="doc-title">사 진 용 지</div>
+          ${items.map(photo => `
+            <div class="photo-slot">
+              <div class="photo-box">
+                <img src="${photo.image}" alt="">
+                <div class="stamp">${escapeHtml(stampText(photo.createdAt))}</div>
+              </div>
+              <div class="caption">${escapeHtml(photo.memo || photoTitle(photo))}</div>
+            </div>
+          `).join("")}
+          <div class="page-no">Page : ${index + 1}</div>
+        </section>
+      `).join("") : `<section class="page"><div class="doc-title">사 진 용 지</div><p>등록된 사진이 없습니다.</p></section>`;
+    }
+
+    async function exportPptx() {
+      if (!state.photos.length) {
+        alert("저장할 사진이 없습니다.");
+        return;
+      }
+      const blob = await createPptx(sortedPhotos(), documentHeader());
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${safeFileName(documentHeader())}_사진자료.pptx`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function editAddress() {
+      const value = prompt("물건지 주소", state.address);
+      if (value == null) return;
+      state.address = value.trim();
+      localStorage.setItem("appraisal.web.address", state.address);
+    }
+
+    async function clearAll() {
+      if (!state.photos.length) return;
+      if (!confirm("등록된 사진을 모두 삭제할까요?")) return;
+      await clearPhotos();
+      state.photos = [];
+      renderCount();
+      renderControls();
+      $("drawer").classList.remove("open");
+    }
+
+    function renderCount() {
+      $("count").textContent = `등록된 사진 ${state.photos.length}장`;
+    }
+
+    function saveControlState() {
+      localStorage.setItem("appraisal.web.category", state.category);
+      localStorage.setItem("appraisal.web.symbol", state.symbol || "");
+      localStorage.setItem("appraisal.web.buildingSub", state.buildingSub || "");
+    }
+
+    function documentHeader() {
+      return state.address || "자체감정 사진";
+    }
+
+    function photoTitle(photo) {
+      if (photo.category === "custom") return `기타사항: ${photo.symbol}`;
+      return `${CATEGORIES[photo.category]?.label || "기타"} 기호 ${photo.symbol}`;
+    }
+
+    function stampText(time) {
+      return `촬영: ${formatDate(time)}`;
+    }
+
+    function formatDate(time) {
+      const d = new Date(time);
+      const pad = n => String(n).padStart(2, "0");
+      return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function safeFileName(value) {
+      return value.replace(/[\\/:*?"<>|\r\n]+/g, "_").trim() || "사진자료";
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    }
+
+    function blobToDataUrl(blob) {
+      return new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    function loadImage(src) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+      });
+    }
+
+    function openDb() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open("appraisal-camera-web", 1);
+        request.onupgradeneeded = () => request.result.createObjectStore("photos", { keyPath: "id" });
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function txStore(mode) {
+      return db.transaction("photos", mode).objectStore("photos");
+    }
+
+    function readAllPhotos() {
+      return new Promise(resolve => {
+        const request = txStore("readonly").getAll();
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => resolve([]);
+      });
+    }
+
+    function putPhoto(photo) {
+      return new Promise(resolve => {
+        const request = txStore("readwrite").put(photo);
+        request.onsuccess = request.onerror = () => resolve();
+      });
+    }
+
+    function deletePhoto(id) {
+      return new Promise(resolve => {
+        const request = txStore("readwrite").delete(id);
+        request.onsuccess = request.onerror = () => resolve();
+      });
+    }
+
+    function clearPhotos() {
+      return new Promise(resolve => {
+        const request = txStore("readwrite").clear();
+        request.onsuccess = request.onerror = () => resolve();
+      });
+    }
+
+    async function createPptx(photos, headerText) {
+      const files = [];
+      const slideCount = Math.ceil(photos.length / 2);
+      addText(files, "[Content_Types].xml", contentTypesXml(slideCount, photos.length));
+      addText(files, "_rels/.rels", packageRelsXml());
+      addText(files, "docProps/core.xml", coreXml());
+      addText(files, "docProps/app.xml", appXml(slideCount));
+      addText(files, "ppt/presentation.xml", presentationXml(slideCount));
+      addText(files, "ppt/_rels/presentation.xml.rels", presentationRelsXml(slideCount));
+      addText(files, "ppt/slideMasters/slideMaster1.xml", slideMasterXml());
+      addText(files, "ppt/slideMasters/_rels/slideMaster1.xml.rels", slideMasterRelsXml());
+      addText(files, "ppt/slideLayouts/slideLayout1.xml", slideLayoutXml());
+      addText(files, "ppt/slideLayouts/_rels/slideLayout1.xml.rels", slideLayoutRelsXml());
+      addText(files, "ppt/theme/theme1.xml", themeXml());
+
+      for (let i = 0; i < slideCount; i++) {
+        const slidePhotos = photos.slice(i * 2, i * 2 + 2);
+        addText(files, `ppt/slides/slide${i + 1}.xml`, slideXml(slidePhotos, i + 1, headerText, i * 2));
+        addText(files, `ppt/slides/_rels/slide${i + 1}.xml.rels`, slideRelsXml(slidePhotos, i * 2));
+      }
+      for (let i = 0; i < photos.length; i++) {
+        addBytes(files, `ppt/media/image${i + 1}.jpg`, dataUrlToBytes(photos[i].image));
+      }
+      return new Blob([zipStore(files)], { type: PPTX_MIME });
+    }
+
+    function addText(files, name, text) {
+      addBytes(files, name, new TextEncoder().encode(text));
+    }
+    function addBytes(files, name, bytes) {
+      files.push({ name, bytes });
+    }
+
+    function contentTypesXml(slides, images) {
+      let xml = `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>`;
+      for (let i = 1; i <= slides; i++) xml += `<Override PartName="/ppt/slides/slide${i}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`;
+      return xml + `</Types>`;
+    }
+    function packageRelsXml() {
+      return `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`;
+    }
+    function presentationXml(slides) {
+      let ids = "";
+      for (let i = 1; i <= slides; i++) ids += `<p:sldId id="${255 + i}" r:id="rId${i}"/>`;
+      return `<?xml version="1.0" encoding="UTF-8"?><p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId${slides + 1}"/></p:sldMasterIdLst><p:sldIdLst>${ids}</p:sldIdLst><p:sldSz cx="9144000" cy="12801600" type="A4"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>`;
+    }
+    function presentationRelsXml(slides) {
+      let rels = "";
+      for (let i = 1; i <= slides; i++) rels += `<Relationship Id="rId${i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${i}.xml"/>`;
+      rels += `<Relationship Id="rId${slides + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/><Relationship Id="rId${slides + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>`;
+      return `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`;
+    }
+    function slideXml(items, page, headerText, imageOffset) {
+      const emu = mm => Math.round(mm * 36000);
+      let xml = `<?xml version="1.0" encoding="UTF-8"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>`;
+      xml += textShape(2, headerText, emu(30), emu(20), emu(150), emu(11), 1100, false);
+      xml += textShape(3, "사 진 용 지", emu(0), emu(40), emu(254), emu(16), 1800, true, "ctr");
+      items.forEach((photo, i) => {
+        const y = i === 0 ? emu(66) : emu(171);
+        xml += pictureShape(10 + i, `rId${i + 1}`, emu(29), y, emu(196), emu(88));
+        xml += textShape(20 + i, stampText(photo.createdAt), emu(145), y + emu(78), emu(75), emu(8), 800, false, "r", "FFFFFF", "000000");
+        xml += textShape(30 + i, photo.memo || photoTitle(photo), emu(29), y + emu(91), emu(196), emu(11), 1100, false, "ctr");
+      });
+      xml += textShape(99, `Page : ${page}`, emu(190), emu(282), emu(38), emu(8), 900, false, "r");
+      return xml + `</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`;
+    }
+    function slideRelsXml(items, imageOffset) {
+      let rels = `<Relationship Id="rId99" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>`;
+      items.forEach((_, i) => rels += `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image${imageOffset + i + 1}.jpg"/>`);
+      return `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`;
+    }
+    function textShape(id, text, x, y, w, h, size, bold, align = "l", color = "000000", fill = null) {
+      const fillXml = fill ? `<a:solidFill><a:srgbClr val="${fill}"><a:alpha val="68000"/></a:srgbClr></a:solidFill>` : "";
+      const shapeXml = `<p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${fillXml}</p:spPr>`;
+      return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Text ${id}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>${shapeXml}<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="${align}"/><a:r><a:rPr lang="ko-KR" sz="${size}"${bold ? ' b="1"' : ""}><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:rPr><a:t>${escapeXml(text)}</a:t></a:r></a:p></p:txBody></p:sp>`;
+    }
+    function pictureShape(id, relId, x, y, w, h) {
+      return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="Photo ${id}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:ln><a:solidFill><a:srgbClr val="333333"/></a:solidFill></a:ln></p:spPr></p:pic>`;
+    }
+    function slideMasterXml() {
+      return `<?xml version="1.0" encoding="UTF-8"?><p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr></p:spTree></p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHLink"/><p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst><p:txStyles><p:titleStyle/><p:bodyStyle/><p:otherStyle/></p:txStyles></p:sldMaster>`;
+    }
+    function slideMasterRelsXml() {
+      return `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/></Relationships>`;
+    }
+    function slideLayoutXml() {
+      return `<?xml version="1.0" encoding="UTF-8"?><p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="blank"><p:cSld name="Blank"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>`;
+    }
+    function slideLayoutRelsXml() {
+      return `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/></Relationships>`;
+    }
+    function themeXml() {
+      return `<?xml version="1.0" encoding="UTF-8"?><a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="AppraisalCamera"><a:themeElements><a:clrScheme name="Office"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F2933"/></a:dk2><a:lt2><a:srgbClr val="F6F7F9"/></a:lt2><a:accent1><a:srgbClr val="116779"/></a:accent1><a:accent2><a:srgbClr val="A3451D"/></a:accent2><a:accent3><a:srgbClr val="6B7280"/></a:accent3><a:accent4><a:srgbClr val="2563EB"/></a:accent4><a:accent5><a:srgbClr val="16A34A"/></a:accent5><a:accent6><a:srgbClr val="9333EA"/></a:accent6><a:hlink><a:srgbClr val="2563EB"/></a:hlink><a:folHlink><a:srgbClr val="9333EA"/></a:folHlink></a:clrScheme><a:fontScheme name="Office"><a:majorFont><a:latin typeface="Arial"/><a:ea typeface="Malgun Gothic"/></a:majorFont><a:minorFont><a:latin typeface="Arial"/><a:ea typeface="Malgun Gothic"/></a:minorFont></a:fontScheme><a:fmtScheme name="Office"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements></a:theme>`;
+    }
+    function coreXml() {
+      return `<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>자체감정 사진자료</dc:title><dc:creator>AppraisalCamera Web</dc:creator></cp:coreProperties>`;
+    }
+    function appXml(slides) {
+      return `<?xml version="1.0" encoding="UTF-8"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>AppraisalCamera Web</Application><PresentationFormat>A4</PresentationFormat><Slides>${slides}</Slides></Properties>`;
+    }
+    function escapeXml(value) {
+      return String(value).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[ch]));
+    }
+    function dataUrlToBytes(dataUrl) {
+      const binary = atob(dataUrl.split(",")[1]);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    }
+
+    function zipStore(files) {
+      const localParts = [];
+      const centralParts = [];
+      let offset = 0;
+      for (const file of files) {
+        const nameBytes = new TextEncoder().encode(file.name);
+        const crc = crc32(file.bytes);
+        const local = new Uint8Array(30 + nameBytes.length + file.bytes.length);
+        const localView = new DataView(local.buffer);
+        localView.setUint32(0, 0x04034b50, true);
+        localView.setUint16(4, 20, true);
+        localView.setUint16(6, 0x0800, true);
+        localView.setUint16(8, 0, true);
+        localView.setUint32(14, crc, true);
+        localView.setUint32(18, file.bytes.length, true);
+        localView.setUint32(22, file.bytes.length, true);
+        localView.setUint16(26, nameBytes.length, true);
+        local.set(nameBytes, 30);
+        local.set(file.bytes, 30 + nameBytes.length);
+        localParts.push(local);
+
+        const central = new Uint8Array(46 + nameBytes.length);
+        const centralView = new DataView(central.buffer);
+        centralView.setUint32(0, 0x02014b50, true);
+        centralView.setUint16(4, 20, true);
+        centralView.setUint16(6, 20, true);
+        centralView.setUint16(8, 0x0800, true);
+        centralView.setUint16(10, 0, true);
+        centralView.setUint32(16, crc, true);
+        centralView.setUint32(20, file.bytes.length, true);
+        centralView.setUint32(24, file.bytes.length, true);
+        centralView.setUint16(28, nameBytes.length, true);
+        centralView.setUint32(42, offset, true);
+        central.set(nameBytes, 46);
+        centralParts.push(central);
+        offset += local.length;
+      }
+      const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+      const end = new Uint8Array(22);
+      const endView = new DataView(end.buffer);
+      endView.setUint32(0, 0x06054b50, true);
+      endView.setUint16(8, files.length, true);
+      endView.setUint16(10, files.length, true);
+      endView.setUint32(12, centralSize, true);
+      endView.setUint32(16, offset, true);
+      return concatBytes([...localParts, ...centralParts, end]);
+    }
+    function concatBytes(parts) {
+      const total = parts.reduce((sum, part) => sum + part.length, 0);
+      const output = new Uint8Array(total);
+      let offset = 0;
+      for (const part of parts) {
+        output.set(part, offset);
+        offset += part.length;
+      }
+      return output;
+    }
+    const CRC_TABLE = (() => {
+      const table = new Uint32Array(256);
+      for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+        table[i] = c >>> 0;
+      }
+      return table;
+    })();
+    function crc32(bytes) {
+      let crc = 0xffffffff;
+      for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+      return (crc ^ 0xffffffff) >>> 0;
+    }
+  </script>
+</body>
+</html>
