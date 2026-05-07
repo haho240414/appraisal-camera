@@ -20,6 +20,7 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.pdf.PdfDocument;
 import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
@@ -73,6 +74,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.ByteArrayOutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -84,7 +86,7 @@ import java.util.Set;
 public class MainActivity extends ComponentActivity {
     private static final int REQUEST_CAMERA = 1001;
     private static final int REQUEST_PICK_IMAGE = 1002;
-    private static final int REQUEST_CREATE_PPTX = 1003;
+    private static final int REQUEST_CREATE_OUTPUT = 1003;
     private static final int PERMISSION_CAMERA = 2001;
     private static final String PREFS = "appraisal_photos";
     private static final String PREF_PHOTOS = "photos";
@@ -106,6 +108,11 @@ public class MainActivity extends ComponentActivity {
     private static final String MAIL_APP_GMAIL = "gmail";
     private static final String GMAIL_PACKAGE = "com.google.android.gm";
     private static final String PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    private static final String PDF_MIME = "application/pdf";
+    private static final String JPG_MIME = "image/jpeg";
+    private static final String FORMAT_PPTX = "pptx";
+    private static final String FORMAT_PDF = "pdf";
+    private static final String FORMAT_JPG = "jpg";
     private static final String MODE_SELF_APPRAISAL = "self_appraisal";
     private static final String MODE_FIELD_SURVEY = "field_survey";
 
@@ -141,7 +148,8 @@ public class MainActivity extends ComponentActivity {
     private int guideAlphaPercent = 82;
     private int guideScalePercent = 78;
     private WebView printWebView;
-    private byte[] pendingPptxBytes;
+    private byte[] pendingExportBytes;
+    private String pendingExportLabel = "";
     private boolean updatingSymbolControls;
 
     @Override
@@ -227,8 +235,8 @@ public class MainActivity extends ComponentActivity {
         Button addressButton = smallButton("물건지");
         addressButton.setOnClickListener(v -> showAddressDialog());
 
-        Button pptxButton = smallButton("PPTX");
-        pptxButton.setOnClickListener(v -> exportPptx());
+        Button pptxButton = smallButton("저장");
+        pptxButton.setOnClickListener(v -> showExportFormatDialog());
 
         Button emailButton = smallButton("공유");
         emailButton.setOnClickListener(v -> showEmailDialog());
@@ -595,7 +603,7 @@ public class MainActivity extends ComponentActivity {
         String shareMode = getSavedMailApp();
         String savedRecipient = getSavedEmailRecipient();
         if (MAIL_APP_OTHER.equals(shareMode) || !savedRecipient.isEmpty()) {
-            sendPptxEmail(savedRecipient);
+            showShareFormatDialog(savedRecipient);
             return;
         }
 
@@ -740,8 +748,8 @@ public class MainActivity extends ComponentActivity {
         content.addView(helpIntro("현장에서 자주 쓰는 버튼과 입력칸의 역할입니다."));
         content.addView(helpItem("자체감정/현지답사", "작업 모드를 선택합니다. 주소가 비어 있을 때 사진자료 제목과 PPTX 파일명이 선택한 모드에 맞게 바뀝니다."));
         content.addView(helpItem("물건지", "사진자료 상단에 표시될 주소를 입력합니다. 입력한 주소별로 앱 내부 사진 폴더도 나뉩니다."));
-        content.addView(helpItem("PPTX", "등록된 사진을 1페이지당 2장씩 정리한 PowerPoint 사진자료로 저장합니다."));
-        content.addView(helpItem("공유", "생성한 PPTX 사진자료를 Gmail 또는 기타 앱으로 공유합니다. 앱에 따라 첨부 지원이 다를 수 있습니다."));
+        content.addView(helpItem("저장", "사진자료를 PPTX, PDF, JPG 중 선택해 저장합니다. JPG는 페이지별 이미지로 저장됩니다."));
+        content.addView(helpItem("공유", "사진자료를 PPTX, PDF, JPG 중 선택해 Gmail 또는 기타 앱으로 공유합니다. 앱에 따라 첨부 지원이 다를 수 있습니다."));
         content.addView(helpItem("목록", "촬영하거나 선택한 사진을 토지, 건물, 제시외건물, 기타 순서로 확인하고 개별 삭제할 수 있습니다."));
         content.addView(helpItem("전체삭제", "현재 등록된 사진 목록과 앱 내부에 저장된 해당 사진 파일을 모두 삭제합니다."));
         content.addView(helpItem("설정", "가이드 패널의 투명도와 크기, 기본 메일주소, 기본 공유 방식을 조정합니다."));
@@ -1032,8 +1040,8 @@ public class MainActivity extends ComponentActivity {
             return;
         }
 
-        if (requestCode == REQUEST_CREATE_PPTX && resultCode == RESULT_OK && data != null && data.getData() != null) {
-            writePendingPptx(data.getData());
+        if (requestCode == REQUEST_CREATE_OUTPUT && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            writePendingExport(data.getData());
         }
     }
 
@@ -1480,25 +1488,47 @@ public class MainActivity extends ComponentActivity {
         printWebView.loadDataWithBaseURL(null, buildPrintHtml(), "text/html", "UTF-8", null);
     }
 
-    private void exportPptx() {
+    private void showExportFormatDialog() {
         if (photos.isEmpty()) {
             Toast.makeText(this, "저장할 사진이 없습니다.", Toast.LENGTH_SHORT).show();
             return;
         }
 
+        String[] labels = {"PPTX", "PDF", "JPG"};
+        String[] formats = {FORMAT_PPTX, FORMAT_PDF, FORMAT_JPG};
+        new AlertDialog.Builder(this)
+                .setTitle("저장 형식 선택")
+                .setItems(labels, (dialog, which) -> exportOutput(formats[which]))
+                .show();
+    }
+
+    private void exportOutput(String format) {
         try {
-            pendingPptxBytes = createPptxBytes();
+            if (FORMAT_JPG.equals(format)) {
+                ArrayList<ExportFile> jpgFiles = createJpgFiles();
+                writePublicFiles(jpgFiles);
+                Toast.makeText(this, "JPG 사진자료를 저장했습니다.", Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            pendingExportBytes = createOutputBytes(format);
+            pendingExportLabel = formatLabel(format);
         } catch (IOException e) {
-            Toast.makeText(this, "PPTX 파일을 만들 수 없습니다.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, formatLabel(format) + " 파일을 만들 수 없습니다.", Toast.LENGTH_LONG).show();
             return;
         }
 
-        String fileName = pptxFileName();
+        String fileName = outputFileName(format);
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        intent.setType(mimeForFormat(format));
         intent.putExtra(Intent.EXTRA_TITLE, fileName);
-        startActivityForResult(intent, REQUEST_CREATE_PPTX);
+        startActivityForResult(intent, REQUEST_CREATE_OUTPUT);
+    }
+
+    private byte[] createOutputBytes(String format) throws IOException {
+        if (FORMAT_PDF.equals(format)) return createPdfBytes();
+        return createPptxBytes();
     }
 
     private byte[] createPptxBytes() throws IOException {
@@ -1513,35 +1543,232 @@ public class MainActivity extends ComponentActivity {
         return PptxExporter.create(this, exportPhotos, documentHeaderText());
     }
 
-    private String pptxFileName() {
-        return modeLabel() + "_사진자료_" + new SimpleDateFormat("yyyyMMdd_HHmm", Locale.KOREA).format(new Date()) + ".pptx";
+    private byte[] createPdfBytes() throws IOException {
+        ArrayList<PhotoItem> sorted = sortedPhotos();
+        PdfDocument document = new PdfDocument();
+        int pageWidth = 595;
+        int pageHeight = 842;
+        try {
+            for (int i = 0; i < sorted.size(); i += 2) {
+                PdfDocument.PageInfo pageInfo = new PdfDocument.PageInfo.Builder(pageWidth, pageHeight, (i / 2) + 1).create();
+                PdfDocument.Page page = document.startPage(pageInfo);
+                drawOutputPage(page.getCanvas(), pageWidth, pageHeight, sorted, i, (i / 2) + 1);
+                document.finishPage(page);
+            }
+
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            document.writeTo(output);
+            return output.toByteArray();
+        } finally {
+            document.close();
+        }
     }
 
-    private void sendPptxEmail(String recipient) {
-        Uri attachmentUri = null;
+    private ArrayList<ExportFile> createJpgFiles() throws IOException {
+        ArrayList<PhotoItem> sorted = sortedPhotos();
+        ArrayList<ExportFile> files = new ArrayList<>();
+        int pageWidth = 1240;
+        int pageHeight = 1754;
+        for (int i = 0; i < sorted.size(); i += 2) {
+            Bitmap bitmap = Bitmap.createBitmap(pageWidth, pageHeight, Bitmap.Config.ARGB_8888);
+            try {
+                Canvas canvas = new Canvas(bitmap);
+                drawOutputPage(canvas, pageWidth, pageHeight, sorted, i, (i / 2) + 1);
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output);
+                files.add(new ExportFile(pageJpgFileName((i / 2) + 1), JPG_MIME, output.toByteArray()));
+            } finally {
+                bitmap.recycle();
+            }
+        }
+        return files;
+    }
+
+    private void drawOutputPage(Canvas canvas, int pageWidth, int pageHeight, ArrayList<PhotoItem> sorted, int startIndex, int pageNumber) throws IOException {
+        float sx = pageWidth / 595f;
+        float sy = pageHeight / 842f;
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
+
+        canvas.drawColor(Color.WHITE);
+        paint.setColor(Color.rgb(20, 20, 20));
+        paint.setTypeface(Typeface.DEFAULT);
+        paint.setTextAlign(Paint.Align.LEFT);
+        paint.setTextSize(12f * sx);
+        canvas.drawText(documentHeaderText(), 44f * sx, 34f * sy, paint);
+
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setTypeface(Typeface.DEFAULT_BOLD);
+        paint.setTextSize(22f * sx);
+        canvas.drawText("사 진 용 지", pageWidth / 2f, 72f * sy, paint);
+
+        paint.setTextAlign(Paint.Align.RIGHT);
+        paint.setTypeface(Typeface.DEFAULT);
+        paint.setTextSize(10f * sx);
+        canvas.drawText("Page : " + pageNumber, 530f * sx, 105f * sy, paint);
+
+        drawOutputPhoto(canvas, sorted.get(startIndex), new RectF(70f * sx, 120f * sy, 525f * sx, 335f * sy), 348f * sy, sx);
+        if (startIndex + 1 < sorted.size()) {
+            drawOutputPhoto(canvas, sorted.get(startIndex + 1), new RectF(70f * sx, 430f * sy, 525f * sx, 645f * sy), 658f * sy, sx);
+        }
+
+        paint.setColor(Color.rgb(20, 20, 20));
+        paint.setTextAlign(Paint.Align.RIGHT);
+        paint.setTypeface(Typeface.DEFAULT);
+        paint.setTextSize(10f * sx);
+        canvas.drawText("Page : " + pageNumber, 530f * sx, 815f * sy, paint);
+    }
+
+    private void drawOutputPhoto(Canvas canvas, PhotoItem photo, RectF frame, float captionBaseline, float scale) throws IOException {
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(Color.rgb(245, 245, 245));
+        canvas.drawRect(frame, paint);
+
+        Bitmap bitmap = null;
+        Bitmap oriented = null;
         try {
-            byte[] pptxBytes = createPptxBytes();
+            Uri uri = Uri.parse(photo.uri);
+            bitmap = decodeBitmap(uri, 2200);
+            if (bitmap != null) {
+                oriented = rotateBitmap(bitmap, readExifOrientation(uri));
+                drawBitmapCenterCrop(canvas, oriented, frame, paint);
+            }
+        } finally {
+            if (oriented != null && oriented != bitmap) oriented.recycle();
+            if (bitmap != null) bitmap.recycle();
+        }
+
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(Math.max(1f, scale));
+        paint.setColor(Color.rgb(35, 35, 35));
+        canvas.drawRect(frame, paint);
+
+        drawOutputStamp(canvas, displayPhotoStamp(photo), frame, scale);
+
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(Color.rgb(20, 20, 20));
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setTypeface(Typeface.DEFAULT);
+        paint.setTextSize(12f * scale);
+        canvas.drawText(photoCaption(photo), frame.centerX(), captionBaseline, paint);
+    }
+
+    private void drawBitmapCenterCrop(Canvas canvas, Bitmap bitmap, RectF dst, Paint paint) {
+        float scale = Math.max(dst.width() / bitmap.getWidth(), dst.height() / bitmap.getHeight());
+        float srcW = dst.width() / scale;
+        float srcH = dst.height() / scale;
+        float left = (bitmap.getWidth() - srcW) / 2f;
+        float top = (bitmap.getHeight() - srcH) / 2f;
+        Rect src = new Rect(
+                Math.max(0, Math.round(left)),
+                Math.max(0, Math.round(top)),
+                Math.min(bitmap.getWidth(), Math.round(left + srcW)),
+                Math.min(bitmap.getHeight(), Math.round(top + srcH))
+        );
+        canvas.drawBitmap(bitmap, src, dst, paint);
+    }
+
+    private void drawOutputStamp(Canvas canvas, String text, RectF frame, float scale) {
+        if (text == null || text.isEmpty()) return;
+        Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
+        textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        textPaint.setTextSize(9f * scale);
+        textPaint.setColor(Color.WHITE);
+        Rect bounds = new Rect();
+        textPaint.getTextBounds(text, 0, text.length(), bounds);
+
+        float padX = 5f * scale;
+        float padY = 4f * scale;
+        float boxW = bounds.width() + padX * 2f;
+        float boxH = bounds.height() + padY * 2f;
+        float left = frame.right - boxW - 8f * scale;
+        float top = frame.bottom - boxH - 8f * scale;
+
+        Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
+        bg.setStyle(Paint.Style.FILL);
+        bg.setColor(Color.argb(175, 0, 0, 0));
+        canvas.drawRect(left, top, left + boxW, top + boxH, bg);
+        canvas.drawText(text, left + padX, top + padY + bounds.height(), textPaint);
+    }
+
+    private String pptxFileName() {
+        return outputFileName(FORMAT_PPTX);
+    }
+
+    private String outputFileName(String format) {
+        String stamp = new SimpleDateFormat("yyyyMMdd_HHmm", Locale.KOREA).format(new Date());
+        return modeLabel() + "_사진자료_" + stamp + "." + extensionForFormat(format);
+    }
+
+    private String pageJpgFileName(int pageNumber) {
+        String stamp = new SimpleDateFormat("yyyyMMdd_HHmm", Locale.KOREA).format(new Date());
+        return modeLabel() + "_사진자료_" + stamp + "_p" + pageNumber + ".jpg";
+    }
+
+    private String extensionForFormat(String format) {
+        if (FORMAT_PDF.equals(format)) return "pdf";
+        if (FORMAT_JPG.equals(format)) return "jpg";
+        return "pptx";
+    }
+
+    private String mimeForFormat(String format) {
+        if (FORMAT_PDF.equals(format)) return PDF_MIME;
+        if (FORMAT_JPG.equals(format)) return JPG_MIME;
+        return PPTX_MIME;
+    }
+
+    private String formatLabel(String format) {
+        if (FORMAT_PDF.equals(format)) return "PDF";
+        if (FORMAT_JPG.equals(format)) return "JPG";
+        return "PPTX";
+    }
+
+    private void showShareFormatDialog(String recipient) {
+        String[] labels = {"PPTX", "PDF", "JPG"};
+        String[] formats = {FORMAT_PPTX, FORMAT_PDF, FORMAT_JPG};
+        new AlertDialog.Builder(this)
+                .setTitle("공유 형식 선택")
+                .setItems(labels, (dialog, which) -> shareOutput(recipient, formats[which]))
+                .show();
+    }
+
+    private void shareOutput(String recipient, String format) {
+        ArrayList<Uri> attachmentUris = new ArrayList<>();
+        try {
             String mailApp = getSavedMailApp();
             boolean otherShare = MAIL_APP_OTHER.equals(mailApp);
-            attachmentUri = otherShare ? writePublicPptx(pptxBytes) : writeCachedPptx(pptxBytes);
-            Intent emailIntent = otherShare ? createShareIntent(attachmentUri) : createEmailIntent(recipient, attachmentUri);
+            if (FORMAT_JPG.equals(format)) {
+                ArrayList<ExportFile> jpgFiles = createJpgFiles();
+                attachmentUris = otherShare ? writePublicFiles(jpgFiles) : writeCachedFiles(jpgFiles);
+            } else {
+                ExportFile file = new ExportFile(outputFileName(format), mimeForFormat(format), createOutputBytes(format));
+                ArrayList<ExportFile> files = new ArrayList<>();
+                files.add(file);
+                attachmentUris = otherShare ? writePublicFiles(files) : writeCachedFiles(files);
+            }
+
+            Intent emailIntent = otherShare
+                    ? createShareIntent(attachmentUris, format)
+                    : createEmailIntent(recipient, attachmentUris, format);
             String mailPackage = selectedMailPackage();
             if (!mailPackage.isEmpty()) {
                 emailIntent.setPackage(mailPackage);
-                grantUriPermission(mailPackage, attachmentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                for (Uri uri : attachmentUris) {
+                    grantUriPermission(mailPackage, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                }
                 startActivity(emailIntent);
             } else {
-                grantUriPermissionsToMatchingApps(emailIntent, attachmentUri);
+                grantUriPermissionsToMatchingApps(emailIntent, attachmentUris);
                 startActivity(Intent.createChooser(emailIntent, "공유 앱 선택"));
             }
         } catch (ActivityNotFoundException e) {
-            openEmailChooserFallback(recipient, attachmentUri);
+            openEmailChooserFallback(recipient, attachmentUris, format);
         } catch (Exception e) {
             Toast.makeText(this, "공유 화면을 열 수 없습니다.", Toast.LENGTH_LONG).show();
         }
     }
 
-    private Uri writeCachedPptx(byte[] pptxBytes) throws IOException {
+    private ArrayList<Uri> writeCachedFiles(ArrayList<ExportFile> files) throws IOException {
         File exportDir = new File(getCacheDir(), "mail_exports");
         if (!exportDir.exists() && !exportDir.mkdirs()) {
             throw new IOException("Cannot create mail export directory");
@@ -1553,18 +1780,30 @@ public class MainActivity extends ComponentActivity {
             }
         }
 
-        File pptxFile = new File(exportDir, pptxFileName());
-        try (FileOutputStream output = new FileOutputStream(pptxFile)) {
-            output.write(pptxBytes);
+        ArrayList<Uri> uris = new ArrayList<>();
+        for (ExportFile file : files) {
+            File exportFile = new File(exportDir, file.name);
+            try (FileOutputStream output = new FileOutputStream(exportFile)) {
+                output.write(file.bytes);
+            }
+            uris.add(FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", exportFile));
         }
-        return FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", pptxFile);
+        return uris;
     }
 
-    private Uri writePublicPptx(byte[] pptxBytes) throws IOException {
+    private ArrayList<Uri> writePublicFiles(ArrayList<ExportFile> files) throws IOException {
+        ArrayList<Uri> uris = new ArrayList<>();
+        for (ExportFile file : files) {
+            uris.add(writePublicFile(file));
+        }
+        return uris;
+    }
+
+    private Uri writePublicFile(ExportFile file) throws IOException {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ContentValues values = new ContentValues();
-            values.put(MediaStore.MediaColumns.DISPLAY_NAME, pptxFileName());
-            values.put(MediaStore.MediaColumns.MIME_TYPE, PPTX_MIME);
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, file.name);
+            values.put(MediaStore.MediaColumns.MIME_TYPE, file.mimeType);
             values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AppraisalCamera");
             values.put(MediaStore.MediaColumns.IS_PENDING, 1);
 
@@ -1575,7 +1814,7 @@ public class MainActivity extends ComponentActivity {
 
             try (OutputStream output = getContentResolver().openOutputStream(uri)) {
                 if (output == null) throw new IOException("No output stream");
-                output.write(pptxBytes);
+                output.write(file.bytes);
             }
 
             ContentValues readyValues = new ContentValues();
@@ -1584,67 +1823,88 @@ public class MainActivity extends ComponentActivity {
             return uri;
         }
 
-        return writeCachedPptx(pptxBytes);
+        ArrayList<ExportFile> files = new ArrayList<>();
+        files.add(file);
+        return writeCachedFiles(files).get(0);
     }
 
-    private Intent createEmailIntent(String recipient, Uri attachmentUri) {
-        Intent emailIntent = new Intent(Intent.ACTION_SEND);
-        emailIntent.setType(PPTX_MIME);
-        emailIntent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{PPTX_MIME, "application/octet-stream"});
+    private Intent createEmailIntent(String recipient, ArrayList<Uri> attachmentUris, String format) {
+        Intent emailIntent = new Intent(attachmentUris.size() > 1 ? Intent.ACTION_SEND_MULTIPLE : Intent.ACTION_SEND);
+        emailIntent.setType(mimeForFormat(format));
         if (recipient != null && !recipient.trim().isEmpty()) {
             emailIntent.putExtra(Intent.EXTRA_EMAIL, new String[]{recipient.trim()});
         }
         emailIntent.putExtra(Intent.EXTRA_SUBJECT, documentHeaderText() + " 사진자료");
-        emailIntent.putExtra(Intent.EXTRA_TEXT, "사진자료 PPTX 파일을 첨부합니다.");
-        emailIntent.putExtra(Intent.EXTRA_STREAM, attachmentUri);
-        emailIntent.setClipData(ClipData.newUri(getContentResolver(), "사진자료 PPTX", attachmentUri));
+        emailIntent.putExtra(Intent.EXTRA_TEXT, "사진자료 " + formatLabel(format) + " 파일을 첨부합니다.");
+        putStreams(emailIntent, attachmentUris);
         emailIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         return emailIntent;
     }
 
-    private Intent createShareIntent(Uri attachmentUri) {
-        Intent shareIntent = new Intent(Intent.ACTION_SEND);
-        shareIntent.setType("*/*");
-        shareIntent.putExtra(Intent.EXTRA_STREAM, attachmentUri);
+    private Intent createShareIntent(ArrayList<Uri> attachmentUris, String format) {
+        Intent shareIntent = new Intent(attachmentUris.size() > 1 ? Intent.ACTION_SEND_MULTIPLE : Intent.ACTION_SEND);
+        shareIntent.setType(mimeForFormat(format));
         shareIntent.putExtra(Intent.EXTRA_TITLE, documentHeaderText() + " 사진자료");
-        shareIntent.setClipData(ClipData.newUri(getContentResolver(), "사진자료 PPTX", attachmentUri));
+        putStreams(shareIntent, attachmentUris);
         shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         return shareIntent;
     }
 
-    private void grantUriPermissionsToMatchingApps(Intent intent, Uri attachmentUri) {
+    private void putStreams(Intent intent, ArrayList<Uri> attachmentUris) {
+        if (attachmentUris.size() == 1) {
+            intent.putExtra(Intent.EXTRA_STREAM, attachmentUris.get(0));
+        } else {
+            intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, attachmentUris);
+        }
+        ClipData clipData = null;
+        for (Uri uri : attachmentUris) {
+            if (clipData == null) {
+                clipData = ClipData.newUri(getContentResolver(), "사진자료", uri);
+            } else {
+                clipData.addItem(new ClipData.Item(uri));
+            }
+        }
+        if (clipData != null) {
+            intent.setClipData(clipData);
+        }
+    }
+
+    private void grantUriPermissionsToMatchingApps(Intent intent, ArrayList<Uri> attachmentUris) {
         for (ResolveInfo resolveInfo : getPackageManager().queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)) {
             if (resolveInfo.activityInfo != null && resolveInfo.activityInfo.packageName != null) {
-                grantUriPermission(resolveInfo.activityInfo.packageName, attachmentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                for (Uri uri : attachmentUris) {
+                    grantUriPermission(resolveInfo.activityInfo.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                }
             }
         }
     }
 
-    private void openEmailChooserFallback(String recipient, Uri attachmentUri) {
-        if (attachmentUri == null) {
+    private void openEmailChooserFallback(String recipient, ArrayList<Uri> attachmentUris, String format) {
+        if (attachmentUris == null || attachmentUris.isEmpty()) {
             Toast.makeText(this, "공유 화면을 열 수 없습니다. 설정에서 'Other'로 바꿔 다시 시도해주세요.", Toast.LENGTH_LONG).show();
             return;
         }
         try {
-            Intent fallbackIntent = createShareIntent(attachmentUri);
-            grantUriPermissionsToMatchingApps(fallbackIntent, attachmentUri);
+            Intent fallbackIntent = createShareIntent(attachmentUris, format);
+            grantUriPermissionsToMatchingApps(fallbackIntent, attachmentUris);
             startActivity(Intent.createChooser(fallbackIntent, "공유 앱 선택"));
         } catch (Exception fallbackError) {
             Toast.makeText(this, "공유 화면을 열 수 없습니다. 설정에서 'Other'로 바꿔 다시 시도해주세요.", Toast.LENGTH_LONG).show();
         }
     }
 
-    private void writePendingPptx(Uri uri) {
-        if (pendingPptxBytes == null) return;
+    private void writePendingExport(Uri uri) {
+        if (pendingExportBytes == null) return;
 
         try (OutputStream output = getContentResolver().openOutputStream(uri)) {
             if (output == null) throw new IOException("No output stream");
-            output.write(pendingPptxBytes);
-            Toast.makeText(this, "PPTX 사진자료를 저장했습니다.", Toast.LENGTH_LONG).show();
+            output.write(pendingExportBytes);
+            Toast.makeText(this, pendingExportLabel + " 사진자료를 저장했습니다.", Toast.LENGTH_LONG).show();
         } catch (IOException e) {
-            Toast.makeText(this, "PPTX 저장에 실패했습니다.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "사진자료 저장에 실패했습니다.", Toast.LENGTH_LONG).show();
         } finally {
-            pendingPptxBytes = null;
+            pendingExportBytes = null;
+            pendingExportLabel = "";
         }
     }
 
@@ -1973,6 +2233,18 @@ public class MainActivity extends ComponentActivity {
         NextSymbol(String base, String sub) {
             this.base = base;
             this.sub = sub;
+        }
+    }
+
+    private static class ExportFile {
+        final String name;
+        final String mimeType;
+        final byte[] bytes;
+
+        ExportFile(String name, String mimeType, byte[] bytes) {
+            this.name = name;
+            this.mimeType = mimeType;
+            this.bytes = bytes;
         }
     }
 
