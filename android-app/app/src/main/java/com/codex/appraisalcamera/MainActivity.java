@@ -92,6 +92,8 @@ public class MainActivity extends ComponentActivity {
     private static final String PREF_PHOTOS = "photos";
     private static final String PREF_ADDRESS = "property_address";
     private static final String PREF_APP_MODE = "app_mode";
+    private static final String PREF_DEBTOR_NAME = "debtor_name";
+    private static final String PREF_FIELD_SURVEYOR = "field_surveyor";
     private static final String PREF_EMAIL = "email_recipient";
     private static final String PREF_MAIL_APP = "mail_app";
     private static final String PREF_CURRENT_CATEGORY = "current_category";
@@ -120,7 +122,8 @@ public class MainActivity extends ComponentActivity {
     private static final String CATEGORY_BUILDING = "building";
     private static final String CATEGORY_EXTRA = "extra";
     private static final String CATEGORY_CUSTOM = "custom";
-    private static final String[] CATEGORY_ORDER = {CATEGORY_LAND, CATEGORY_BUILDING, CATEGORY_EXTRA, CATEGORY_CUSTOM};
+    private static final String CATEGORY_FIELD = "field";
+    private static final String[] CATEGORY_ORDER = {CATEGORY_LAND, CATEGORY_BUILDING, CATEGORY_EXTRA, CATEGORY_CUSTOM, CATEGORY_FIELD};
     private static final String[] LAND_SYMBOLS = makeNumberSymbols(99);
     private static final String[] BUILDING_SYMBOLS = {"가", "나", "다", "라", "마", "바", "사", "아", "자", "차", "카", "타", "파", "하"};
     private static final String[] EXTRA_SYMBOLS = {"ㄱ", "ㄴ", "ㄷ", "ㄹ", "ㅁ", "ㅂ", "ㅅ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"};
@@ -132,10 +135,14 @@ public class MainActivity extends ComponentActivity {
     private TextView statusText;
     private TextView countText;
     private LinearLayout controlsPanel;
+    private LinearLayout symbolRow;
+    private LinearLayout fieldSurveyPanel;
     private RadioGroup categoryGroup;
     private Spinner symbolSpinner;
     private Spinner buildingSubSpinner;
     private EditText customSymbolInput;
+    private EditText debtorInput;
+    private EditText fieldSurveyorInput;
     private EditText memoInput;
     private PreviewView previewView;
     private ImageCapture imageCapture;
@@ -145,6 +152,8 @@ public class MainActivity extends ComponentActivity {
     private String currentMemo = "";
     private String propertyAddress = "";
     private String appMode = MODE_SELF_APPRAISAL;
+    private String debtorName = "";
+    private String fieldSurveyor = "";
     private int guideAlphaPercent = 82;
     private int guideScalePercent = 78;
     private WebView printWebView;
@@ -159,6 +168,7 @@ public class MainActivity extends ComponentActivity {
         loadPhotos();
         loadAppMode();
         loadPropertyAddress();
+        loadFieldSurveyInfo();
         loadGuideSettings();
         restoreControlState(savedInstanceState);
         buildUi();
@@ -302,7 +312,28 @@ public class MainActivity extends ComponentActivity {
         controlsPanel.addView(categoryGroup);
         updateCategoryStyles();
 
-        LinearLayout symbolRow = new LinearLayout(this);
+        fieldSurveyPanel = new LinearLayout(this);
+        fieldSurveyPanel.setOrientation(LinearLayout.VERTICAL);
+        fieldSurveyPanel.setPadding(0, dp(4), 0, 0);
+
+        debtorInput = fieldInput("채무자 명", debtorName);
+        debtorInput.addTextChangedListener(simpleTextWatcher(text -> {
+            debtorName = text.trim();
+            saveFieldSurveyInfo();
+        }));
+        fieldSurveyPanel.addView(debtorInput, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)));
+
+        fieldSurveyorInput = fieldInput("현지답사자", fieldSurveyor);
+        fieldSurveyorInput.addTextChangedListener(simpleTextWatcher(text -> {
+            fieldSurveyor = text.trim();
+            saveFieldSurveyInfo();
+        }));
+        LinearLayout.LayoutParams surveyorParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34));
+        surveyorParams.topMargin = dp(5);
+        fieldSurveyPanel.addView(fieldSurveyorInput, surveyorParams);
+        controlsPanel.addView(fieldSurveyPanel);
+
+        symbolRow = new LinearLayout(this);
         symbolRow.setOrientation(LinearLayout.HORIZONTAL);
         symbolRow.setPadding(0, dp(5), 0, 0);
 
@@ -374,6 +405,7 @@ public class MainActivity extends ComponentActivity {
         subParams.leftMargin = dp(6);
         symbolRow.addView(buildingSubSpinner, subParams);
         controlsPanel.addView(symbolRow);
+        applyModeControlsVisibility();
 
         memoInput = new EditText(this);
         memoInput.setSingleLine(true);
@@ -554,6 +586,13 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
+    private void applyModeControlsVisibility() {
+        boolean fieldMode = isFieldSurveyMode();
+        if (categoryGroup != null) categoryGroup.setVisibility(fieldMode ? View.GONE : View.VISIBLE);
+        if (symbolRow != null) symbolRow.setVisibility(fieldMode ? View.GONE : View.VISIBLE);
+        if (fieldSurveyPanel != null) fieldSurveyPanel.setVisibility(fieldMode ? View.VISIBLE : View.GONE);
+    }
+
     private void showModeDialog(Button modeButton) {
         String[] labels = {"자체감정", "현지답사"};
         String[] values = {MODE_SELF_APPRAISAL, MODE_FIELD_SURVEY};
@@ -567,9 +606,40 @@ public class MainActivity extends ComponentActivity {
                     modeButton.setText(modeLabel());
                     Toast.makeText(this, labels[which] + " 모드로 변경했습니다.", Toast.LENGTH_SHORT).show();
                     dialog.dismiss();
+                    recreate();
                 })
                 .setNegativeButton("취소", null)
                 .show();
+    }
+
+    private EditText fieldInput(String hint, String value) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        input.setHint(hint);
+        input.setText(value);
+        input.setTextSize(13);
+        input.setPadding(dp(10), 0, dp(10), 0);
+        input.setBackground(roundedDrawable(Color.WHITE, Color.rgb(215, 222, 230), 1, 8));
+        input.setOnFocusChangeListener((view, hasFocus) -> keepInputVisible(view, hasFocus));
+        return input;
+    }
+
+    private TextWatcher simpleTextWatcher(TextUpdate update) {
+        return new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                update.onTextChanged(s.toString());
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+            }
+        };
     }
 
     private void showAddressDialog() {
@@ -748,6 +818,7 @@ public class MainActivity extends ComponentActivity {
         content.addView(helpIntro("현장에서 자주 쓰는 버튼과 입력칸의 역할입니다."));
         content.addView(helpItem("자체감정/현지답사", "작업 모드를 선택합니다. 주소가 비어 있을 때 사진자료 제목과 PPTX 파일명이 선택한 모드에 맞게 바뀝니다."));
         content.addView(helpItem("물건지", "사진자료 상단에 표시될 주소를 입력합니다. 입력한 주소별로 앱 내부 사진 폴더도 나뉩니다."));
+        content.addView(helpItem("채무자 명/현지답사자", "현지답사 모드에서 표시됩니다. 촬영 시점의 채무자와 답사자 정보가 사진자료 설명에 함께 저장됩니다."));
         content.addView(helpItem("저장", "사진자료를 PPTX, PDF, JPG 중 선택해 저장합니다. JPG는 페이지별 이미지로 저장됩니다."));
         content.addView(helpItem("공유", "사진자료를 PPTX, PDF, JPG 중 선택해 Gmail 또는 기타 앱으로 공유합니다. 앱에 따라 첨부 지원이 다를 수 있습니다."));
         content.addView(helpItem("목록", "촬영하거나 선택한 사진을 토지, 건물, 제시외건물, 기타 순서로 확인하고 개별 삭제할 수 있습니다."));
@@ -863,6 +934,11 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void updateSymbolControls() {
+        if (isFieldSurveyMode()) {
+            applyModeControlsVisibility();
+            return;
+        }
+
         if (CATEGORY_CUSTOM.equals(currentCategory)) {
             updatingSymbolControls = true;
             try {
@@ -925,6 +1001,10 @@ public class MainActivity extends ComponentActivity {
     }
 
     private String selectedSymbol() {
+        if (isFieldSurveyMode()) {
+            return String.valueOf(nextFieldPhotoNumber());
+        }
+
         if (CATEGORY_CUSTOM.equals(currentCategory)) {
             String custom = customSymbolInput.getText().toString().trim();
             return custom.isEmpty() ? "기타사항" : custom;
@@ -936,6 +1016,20 @@ public class MainActivity extends ComponentActivity {
         String sub = BUILDING_SUB_SYMBOLS[buildingSubSpinner.getSelectedItemPosition()];
         if ("없음".equals(sub)) return base;
         return base + sub;
+    }
+
+    private int nextFieldPhotoNumber() {
+        int max = 0;
+        for (PhotoItem photo : photos) {
+            if (CATEGORY_FIELD.equals(photo.category)) {
+                try {
+                    max = Math.max(max, Integer.parseInt(photo.symbol));
+                } catch (NumberFormatException ignored) {
+                    max++;
+                }
+            }
+        }
+        return max + 1;
     }
 
     private NextSymbol nextSymbol(String category) {
@@ -976,6 +1070,7 @@ public class MainActivity extends ComponentActivity {
                 Preview preview = new Preview.Builder().build();
                 imageCapture = new ImageCapture.Builder()
                         .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                        .setJpegQuality(75)
                         .build();
                 preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
@@ -1074,6 +1169,7 @@ public class MainActivity extends ComponentActivity {
                 if (savedUri == null) {
                     savedUri = Uri.fromFile(outputFile);
                 }
+                compressSavedImage(savedUri);
                 addPhoto(savedUri.toString(), capturedAt, false);
             }
 
@@ -1135,6 +1231,36 @@ public class MainActivity extends ComponentActivity {
             if (oriented != null && oriented != bitmap) oriented.recycle();
             if (bitmap != null) bitmap.recycle();
         }
+    }
+
+    private void compressSavedImage(Uri uri) {
+        Bitmap bitmap = null;
+        Bitmap oriented = null;
+        try {
+            bitmap = decodeBitmap(uri, 1800);
+            if (bitmap == null) {
+                throw new IOException("Cannot decode captured image");
+            }
+            oriented = rotateBitmap(bitmap, readExifOrientation(uri));
+            try (OutputStream output = openImageOutputStream(uri)) {
+                if (output == null) {
+                    throw new IOException("Cannot open captured image for writing");
+                }
+                oriented.compress(Bitmap.CompressFormat.JPEG, 78, output);
+            }
+        } catch (IOException e) {
+            Toast.makeText(this, "사진 용량 줄이기에 실패했습니다.", Toast.LENGTH_SHORT).show();
+        } finally {
+            if (oriented != null && oriented != bitmap) oriented.recycle();
+            if (bitmap != null) bitmap.recycle();
+        }
+    }
+
+    private OutputStream openImageOutputStream(Uri uri) throws IOException {
+        if ("file".equals(uri.getScheme()) && uri.getPath() != null) {
+            return new FileOutputStream(new File(uri.getPath()));
+        }
+        return getContentResolver().openOutputStream(uri, "w");
     }
 
     private Bitmap decodeBitmap(Uri uri, int maxSideLimit) throws IOException {
@@ -1249,17 +1375,19 @@ public class MainActivity extends ComponentActivity {
         String symbol = selectedSymbol();
         PhotoItem item = new PhotoItem();
         item.id = String.valueOf(createdAt) + "-" + Math.round(Math.random() * 100000);
-        item.category = currentCategory;
+        item.category = isFieldSurveyMode() ? CATEGORY_FIELD : currentCategory;
         item.symbol = symbol;
         item.memo = memoInput.getText().toString().trim();
         item.uri = uri;
         item.createdAt = createdAt;
         item.stamped = stamped;
+        item.debtorName = isFieldSurveyMode() ? debtorName.trim() : "";
+        item.fieldSurveyor = isFieldSurveyMode() ? fieldSurveyor.trim() : "";
         photos.add(item);
 
         memoInput.setText("");
         currentMemo = "";
-        if (!CATEGORY_CUSTOM.equals(currentCategory)) {
+        if (!CATEGORY_CUSTOM.equals(currentCategory) && !isFieldSurveyMode()) {
             currentSymbol = "";
         }
         currentBuildingSub = "";
@@ -1276,7 +1404,9 @@ public class MainActivity extends ComponentActivity {
 
         if (photos.isEmpty()) {
             TextView empty = new TextView(this);
-            empty.setText("촬영한 사진이 토지, 건물, 제시외건물, 기타 순서로 정리됩니다.");
+            empty.setText(isFieldSurveyMode()
+                    ? "현지답사 사진이 촬영 순서로 정리됩니다."
+                    : "촬영한 사진이 토지, 건물, 제시외건물, 기타 순서로 정리됩니다.");
             empty.setGravity(Gravity.CENTER);
             empty.setTextColor(Color.rgb(104, 112, 125));
             listContainer.addView(empty, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(180)));
@@ -1372,7 +1502,7 @@ public class MainActivity extends ComponentActivity {
         card.addView(title);
 
         TextView memo = new TextView(this);
-        memo.setText(photo.memo.isEmpty() ? formatDate(photo.createdAt) : photo.memo);
+        memo.setText(photoMetaText(photo));
         memo.setTextSize(13);
         memo.setTextColor(Color.rgb(104, 112, 125));
         memo.setPadding(0, dp(2), 0, dp(8));
@@ -1417,6 +1547,14 @@ public class MainActivity extends ComponentActivity {
     }
 
     private int symbolRank(PhotoItem photo) {
+        if (CATEGORY_FIELD.equals(photo.category)) {
+            try {
+                return Integer.parseInt(photo.symbol);
+            } catch (NumberFormatException ignored) {
+                return 9999;
+            }
+        }
+
         if (CATEGORY_LAND.equals(photo.category)) {
             try {
                 return Integer.parseInt(photo.symbol);
@@ -2029,6 +2167,8 @@ public class MainActivity extends ComponentActivity {
                 item.uri = object.optString("uri");
                 item.createdAt = object.optLong("createdAt", System.currentTimeMillis());
                 item.stamped = object.optBoolean("stamped", true);
+                item.debtorName = object.optString("debtorName");
+                item.fieldSurveyor = object.optString("fieldSurveyor");
                 if (!item.uri.isEmpty()) photos.add(item);
             }
         } catch (JSONException ignored) {
@@ -2051,6 +2191,20 @@ public class MainActivity extends ComponentActivity {
 
     private void saveAppMode() {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_APP_MODE, appMode).apply();
+    }
+
+    private void loadFieldSurveyInfo() {
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        debtorName = prefs.getString(PREF_DEBTOR_NAME, "");
+        fieldSurveyor = prefs.getString(PREF_FIELD_SURVEYOR, "");
+    }
+
+    private void saveFieldSurveyInfo() {
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit()
+                .putString(PREF_DEBTOR_NAME, debtorName)
+                .putString(PREF_FIELD_SURVEYOR, fieldSurveyor)
+                .apply();
     }
 
     private void loadGuideSettings() {
@@ -2115,6 +2269,7 @@ public class MainActivity extends ComponentActivity {
     }
 
     private String normalizeCategory(String category) {
+        if (CATEGORY_FIELD.equals(category)) return CATEGORY_LAND;
         for (String value : CATEGORY_ORDER) {
             if (value.equals(category)) return value;
         }
@@ -2141,6 +2296,8 @@ public class MainActivity extends ComponentActivity {
                 object.put("uri", item.uri);
                 object.put("createdAt", item.createdAt);
                 object.put("stamped", item.stamped);
+                object.put("debtorName", item.debtorName);
+                object.put("fieldSurveyor", item.fieldSurveyor);
                 array.put(object);
             } catch (JSONException ignored) {
                 // JSONObject with string values should not fail in normal use.
@@ -2153,6 +2310,7 @@ public class MainActivity extends ComponentActivity {
         if (CATEGORY_LAND.equals(category)) return "토지";
         if (CATEGORY_BUILDING.equals(category)) return "건물";
         if (CATEGORY_CUSTOM.equals(category)) return "기타";
+        if (CATEGORY_FIELD.equals(category)) return "현지답사";
         return "제시외건물";
     }
 
@@ -2168,16 +2326,50 @@ public class MainActivity extends ComponentActivity {
         return photoStamp(photo);
     }
 
+    private String photoMetaText(PhotoItem photo) {
+        String details = fieldPhotoDetails(photo);
+        if (photo.memo.isEmpty()) {
+            return details.isEmpty() ? formatDate(photo.createdAt) : details;
+        }
+        return details.isEmpty() ? photo.memo : photo.memo + " / " + details;
+    }
+
     private String photoCaption(PhotoItem photo) {
+        if (CATEGORY_FIELD.equals(photo.category)) {
+            String details = fieldPhotoDetails(photo);
+            if (!photo.memo.isEmpty() && !details.isEmpty()) return photo.memo + " / " + details;
+            if (!photo.memo.isEmpty()) return photo.memo;
+            if (!details.isEmpty()) return details;
+        }
         if (!photo.memo.isEmpty()) return photo.memo;
         return photoTitle(photo);
     }
 
     private String photoTitle(PhotoItem photo) {
+        if (CATEGORY_FIELD.equals(photo.category)) {
+            return "현지답사 사진 " + photo.symbol;
+        }
         if (CATEGORY_CUSTOM.equals(photo.category)) {
             return "기타사항: " + photo.symbol;
         }
         return categoryLabel(photo.category) + " 기호 " + photo.symbol;
+    }
+
+    private String fieldPhotoDetails(PhotoItem photo) {
+        if (!CATEGORY_FIELD.equals(photo.category)) return "";
+        ArrayList<String> parts = new ArrayList<>();
+        if (photo.debtorName != null && !photo.debtorName.trim().isEmpty()) {
+            parts.add("채무자: " + photo.debtorName.trim());
+        }
+        if (photo.fieldSurveyor != null && !photo.fieldSurveyor.trim().isEmpty()) {
+            parts.add("답사자: " + photo.fieldSurveyor.trim());
+        }
+        if (parts.isEmpty()) return "";
+        StringBuilder builder = new StringBuilder(parts.get(0));
+        for (int i = 1; i < parts.size(); i++) {
+            builder.append(" / ").append(parts.get(i));
+        }
+        return builder.toString();
     }
 
     private String documentHeaderText() {
@@ -2189,6 +2381,10 @@ public class MainActivity extends ComponentActivity {
 
     private String modeLabel() {
         return MODE_FIELD_SURVEY.equals(appMode) ? "현지답사" : "자체감정";
+    }
+
+    private boolean isFieldSurveyMode() {
+        return MODE_FIELD_SURVEY.equals(appMode);
     }
 
     private String modeDefaultTitle() {
@@ -2248,6 +2444,10 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
+    private interface TextUpdate {
+        void onTextChanged(String text);
+    }
+
     private static class PhotoItem {
         String id;
         String category;
@@ -2256,5 +2456,7 @@ public class MainActivity extends ComponentActivity {
         String uri;
         long createdAt;
         boolean stamped;
+        String debtorName;
+        String fieldSurveyor;
     }
 }
