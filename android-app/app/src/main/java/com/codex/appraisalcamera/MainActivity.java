@@ -229,10 +229,14 @@ public class MainActivity extends ComponentActivity {
 
         Button settingsButton = smallButton("설정");
         settingsButton.setOnClickListener(v -> showGuideSettingsDialog());
+
+        Button helpButton = smallButton("도움말");
+        helpButton.setOnClickListener(v -> showHelpDialog());
         if (portrait) {
             addToolbarButton(firstToolbarRow, addressButton, false);
             addToolbarButton(firstToolbarRow, pptxButton, false);
             addToolbarButton(firstToolbarRow, emailButton, false);
+            addToolbarButton(firstToolbarRow, helpButton, false);
             addToolbarButton(secondToolbarRow, listButton, false);
             addToolbarButton(secondToolbarRow, clearButton, false);
             addToolbarButton(secondToolbarRow, settingsButton, false);
@@ -243,6 +247,7 @@ public class MainActivity extends ComponentActivity {
             addToolbarButton(header, listButton, true);
             addToolbarButton(header, clearButton, true);
             addToolbarButton(header, settingsButton, true);
+            addToolbarButton(header, helpButton, true);
         }
         overlay.addView(header, toolbarLayoutParams(portrait));
 
@@ -692,6 +697,70 @@ public class MainActivity extends ComponentActivity {
                 })
                 .setPositiveButton("닫기", null)
                 .show();
+    }
+
+    private void showHelpDialog() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(18), dp(14), dp(18), dp(8));
+
+        content.addView(helpIntro("현장에서 자주 쓰는 버튼과 입력칸의 역할입니다."));
+        content.addView(helpItem("물건지", "사진자료 상단에 표시될 주소를 입력합니다. 입력한 주소별로 앱 내부 사진 폴더도 나뉩니다."));
+        content.addView(helpItem("PPTX", "등록된 사진을 1페이지당 2장씩 정리한 PowerPoint 사진자료로 저장합니다."));
+        content.addView(helpItem("공유", "생성한 PPTX 사진자료를 Gmail 또는 기타 앱으로 공유합니다. 앱에 따라 첨부 지원이 다를 수 있습니다."));
+        content.addView(helpItem("목록", "촬영하거나 선택한 사진을 토지, 건물, 제시외건물, 기타 순서로 확인하고 개별 삭제할 수 있습니다."));
+        content.addView(helpItem("전체삭제", "현재 등록된 사진 목록과 앱 내부에 저장된 해당 사진 파일을 모두 삭제합니다."));
+        content.addView(helpItem("설정", "가이드 패널의 투명도와 크기, 기본 메일주소, 기본 공유 방식을 조정합니다."));
+        content.addView(helpItem("토지/건물/제시외/기타", "촬영 대상의 종류를 고릅니다. 토지는 숫자, 건물은 가/나/다, 제시외는 ㄱ/ㄴ/ㄷ 순서로 정리됩니다."));
+        content.addView(helpItem("기호 선택", "선택한 분류의 기호를 지정합니다. 사진을 찍으면 다음 미사용 기호가 자동으로 선택됩니다."));
+        content.addView(helpItem("기타사항 입력", "기타를 선택했을 때 직접 항목명을 입력합니다. 한 번 촬영해도 입력값은 유지됩니다."));
+        content.addView(helpItem("사진 설명", "사진 하단 설명 문구입니다. 비워두면 분류와 기호가 자동으로 들어갑니다."));
+        content.addView(helpItem("촬영", "현재 카메라 화면을 촬영해 앱 내부 물건지 폴더에 저장하고 사진자료 목록에 추가합니다."));
+        content.addView(helpItem("이미지 선택", "이미 촬영된 사진을 선택해 현재 분류와 기호로 사진자료 목록에 추가합니다."));
+
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.addView(content);
+
+        new AlertDialog.Builder(this)
+                .setTitle("도움말")
+                .setView(scrollView)
+                .setPositiveButton("닫기", null)
+                .show();
+    }
+
+    private TextView helpIntro(String text) {
+        TextView view = new TextView(this);
+        view.setText(text);
+        view.setTextSize(13);
+        view.setTextColor(Color.rgb(82, 91, 105));
+        view.setPadding(0, 0, 0, dp(10));
+        return view;
+    }
+
+    private View helpItem(String title, String description) {
+        LinearLayout item = new LinearLayout(this);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.setPadding(dp(12), dp(10), dp(12), dp(10));
+        item.setBackground(roundedDrawable(Color.rgb(247, 249, 251), Color.rgb(224, 229, 236), 1, 8));
+
+        TextView titleView = new TextView(this);
+        titleView.setText(title);
+        titleView.setTextSize(14);
+        titleView.setTypeface(Typeface.DEFAULT_BOLD);
+        titleView.setTextColor(Color.rgb(21, 23, 26));
+        item.addView(titleView);
+
+        TextView descriptionView = new TextView(this);
+        descriptionView.setText(description);
+        descriptionView.setTextSize(13);
+        descriptionView.setTextColor(Color.rgb(82, 91, 105));
+        descriptionView.setPadding(0, dp(3), 0, 0);
+        item.addView(descriptionView);
+
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.bottomMargin = dp(8);
+        item.setLayoutParams(params);
+        return item;
     }
 
     private void showMailAppDialog() {
