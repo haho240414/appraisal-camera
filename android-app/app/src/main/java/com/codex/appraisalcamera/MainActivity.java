@@ -89,6 +89,7 @@ public class MainActivity extends ComponentActivity {
     private static final String PREFS = "appraisal_photos";
     private static final String PREF_PHOTOS = "photos";
     private static final String PREF_ADDRESS = "property_address";
+    private static final String PREF_APP_MODE = "app_mode";
     private static final String PREF_EMAIL = "email_recipient";
     private static final String PREF_MAIL_APP = "mail_app";
     private static final String PREF_CURRENT_CATEGORY = "current_category";
@@ -105,6 +106,8 @@ public class MainActivity extends ComponentActivity {
     private static final String MAIL_APP_GMAIL = "gmail";
     private static final String GMAIL_PACKAGE = "com.google.android.gm";
     private static final String PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    private static final String MODE_SELF_APPRAISAL = "self_appraisal";
+    private static final String MODE_FIELD_SURVEY = "field_survey";
 
     private static final String CATEGORY_LAND = "land";
     private static final String CATEGORY_BUILDING = "building";
@@ -134,6 +137,7 @@ public class MainActivity extends ComponentActivity {
     private String currentBuildingSub = "";
     private String currentMemo = "";
     private String propertyAddress = "";
+    private String appMode = MODE_SELF_APPRAISAL;
     private int guideAlphaPercent = 82;
     private int guideScalePercent = 78;
     private WebView printWebView;
@@ -145,6 +149,7 @@ public class MainActivity extends ComponentActivity {
         super.onCreate(savedInstanceState);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         loadPhotos();
+        loadAppMode();
         loadPropertyAddress();
         loadGuideSettings();
         restoreControlState(savedInstanceState);
@@ -202,14 +207,22 @@ public class MainActivity extends ComponentActivity {
 
         LinearLayout firstToolbarRow = header;
         LinearLayout secondToolbarRow = null;
+        LinearLayout thirdToolbarRow = null;
         if (portrait) {
             firstToolbarRow = toolbarRow();
             secondToolbarRow = toolbarRow();
+            thirdToolbarRow = toolbarRow();
             header.addView(firstToolbarRow);
             LinearLayout.LayoutParams secondRowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             secondRowParams.topMargin = dp(5);
             header.addView(secondToolbarRow, secondRowParams);
+            LinearLayout.LayoutParams thirdRowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            thirdRowParams.topMargin = dp(5);
+            header.addView(thirdToolbarRow, thirdRowParams);
         }
+
+        Button modeButton = smallButton(modeLabel());
+        modeButton.setOnClickListener(v -> showModeDialog(modeButton));
 
         Button addressButton = smallButton("물건지");
         addressButton.setOnClickListener(v -> showAddressDialog());
@@ -233,14 +246,16 @@ public class MainActivity extends ComponentActivity {
         Button helpButton = smallButton("도움말");
         helpButton.setOnClickListener(v -> showHelpDialog());
         if (portrait) {
+            addToolbarButton(firstToolbarRow, modeButton, false);
             addToolbarButton(firstToolbarRow, addressButton, false);
             addToolbarButton(firstToolbarRow, pptxButton, false);
-            addToolbarButton(firstToolbarRow, emailButton, false);
-            addToolbarButton(firstToolbarRow, helpButton, false);
+            addToolbarButton(secondToolbarRow, emailButton, false);
             addToolbarButton(secondToolbarRow, listButton, false);
-            addToolbarButton(secondToolbarRow, clearButton, false);
-            addToolbarButton(secondToolbarRow, settingsButton, false);
+            addToolbarButton(secondToolbarRow, helpButton, false);
+            addToolbarButton(thirdToolbarRow, clearButton, false);
+            addToolbarButton(thirdToolbarRow, settingsButton, false);
         } else {
+            addToolbarButton(header, modeButton, true);
             addToolbarButton(header, addressButton, true);
             addToolbarButton(header, pptxButton, true);
             addToolbarButton(header, emailButton, true);
@@ -531,6 +546,24 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
+    private void showModeDialog(Button modeButton) {
+        String[] labels = {"자체감정", "현지답사"};
+        String[] values = {MODE_SELF_APPRAISAL, MODE_FIELD_SURVEY};
+        int checked = MODE_FIELD_SURVEY.equals(appMode) ? 1 : 0;
+
+        new AlertDialog.Builder(this)
+                .setTitle("작업 모드")
+                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
+                    appMode = values[which];
+                    saveAppMode();
+                    modeButton.setText(modeLabel());
+                    Toast.makeText(this, labels[which] + " 모드로 변경했습니다.", Toast.LENGTH_SHORT).show();
+                    dialog.dismiss();
+                })
+                .setNegativeButton("취소", null)
+                .show();
+    }
+
     private void showAddressDialog() {
         EditText input = new EditText(this);
         input.setSingleLine(true);
@@ -705,6 +738,7 @@ public class MainActivity extends ComponentActivity {
         content.setPadding(dp(18), dp(14), dp(18), dp(8));
 
         content.addView(helpIntro("현장에서 자주 쓰는 버튼과 입력칸의 역할입니다."));
+        content.addView(helpItem("자체감정/현지답사", "작업 모드를 선택합니다. 주소가 비어 있을 때 사진자료 제목과 PPTX 파일명이 선택한 모드에 맞게 바뀝니다."));
         content.addView(helpItem("물건지", "사진자료 상단에 표시될 주소를 입력합니다. 입력한 주소별로 앱 내부 사진 폴더도 나뉩니다."));
         content.addView(helpItem("PPTX", "등록된 사진을 1페이지당 2장씩 정리한 PowerPoint 사진자료로 저장합니다."));
         content.addView(helpItem("공유", "생성한 PPTX 사진자료를 Gmail 또는 기타 앱으로 공유합니다. 앱에 따라 첨부 지원이 다를 수 있습니다."));
@@ -1059,7 +1093,7 @@ public class MainActivity extends ComponentActivity {
 
     private String propertyFolderName() {
         String name = documentHeaderText();
-        if ("자체감정 사진".equals(name)) {
+        if (modeDefaultTitle().equals(name)) {
             name = "미지정_물건지";
         }
         name = name.replaceAll("[\\\\/:*?\"<>|\\r\\n]+", "_").trim();
@@ -1439,7 +1473,7 @@ public class MainActivity extends ComponentActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 PrintManager printManager = (PrintManager) getSystemService(PRINT_SERVICE);
-                PrintDocumentAdapter adapter = view.createPrintDocumentAdapter("자체감정_사진출력자료");
+                PrintDocumentAdapter adapter = view.createPrintDocumentAdapter(modeLabel() + "_사진출력자료");
                 printManager.print(documentHeaderText() + " 사진 출력자료", adapter, new PrintAttributes.Builder().build());
             }
         });
@@ -1480,7 +1514,7 @@ public class MainActivity extends ComponentActivity {
     }
 
     private String pptxFileName() {
-        return "자체감정_사진자료_" + new SimpleDateFormat("yyyyMMdd_HHmm", Locale.KOREA).format(new Date()) + ".pptx";
+        return modeLabel() + "_사진자료_" + new SimpleDateFormat("yyyyMMdd_HHmm", Locale.KOREA).format(new Date()) + ".pptx";
     }
 
     private void sendPptxEmail(String recipient) {
@@ -1750,6 +1784,15 @@ public class MainActivity extends ComponentActivity {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_ADDRESS, propertyAddress).apply();
     }
 
+    private void loadAppMode() {
+        String savedMode = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_APP_MODE, MODE_SELF_APPRAISAL);
+        appMode = MODE_FIELD_SURVEY.equals(savedMode) ? MODE_FIELD_SURVEY : MODE_SELF_APPRAISAL;
+    }
+
+    private void saveAppMode() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_APP_MODE, appMode).apply();
+    }
+
     private void loadGuideSettings() {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         guideAlphaPercent = clamp(prefs.getInt(PREF_GUIDE_ALPHA, 82), 35, 100);
@@ -1879,9 +1922,17 @@ public class MainActivity extends ComponentActivity {
 
     private String documentHeaderText() {
         if (propertyAddress == null || propertyAddress.trim().isEmpty()) {
-            return "자체감정 사진";
+            return modeDefaultTitle();
         }
         return propertyAddress.trim();
+    }
+
+    private String modeLabel() {
+        return MODE_FIELD_SURVEY.equals(appMode) ? "현지답사" : "자체감정";
+    }
+
+    private String modeDefaultTitle() {
+        return modeLabel() + " 사진";
     }
 
     private static int indexOf(String[] values, String target) {
