@@ -11,8 +11,11 @@ android {
         minSdk 29
         targetSdk 35
         // 워크플로 환경변수로 동적 주입. 미설정 시 기본 1/1.0.
-        versionCode (System.getenv("APP_VERSION_CODE") ?: "1") as Integer
-        versionName System.getenv("APP_VERSION_NAME") ?: "1.0"
+        // 주의: `versionCode (...) as Integer` 는 Groovy 우선순위 때문에
+        // `(versionCode(arg)) as Integer` 로 파싱돼 "Value is null" 오류 발생.
+        // `=` 로 명시적 property 할당 + Integer.parseInt 로 안전하게 처리.
+        versionCode = Integer.parseInt(System.getenv("APP_VERSION_CODE") ?: "1")
+        versionName = System.getenv("APP_VERSION_NAME") ?: "1.0"
     }
 
     compileOptions {
