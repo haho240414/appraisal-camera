@@ -1,7 +1,6 @@
 package com.codex.appraisalcamera;
 
 import android.Manifest;
-import android.annotation.SuppressLint;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
@@ -26,6 +25,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.MediaStore;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -54,6 +55,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import androidx.activity.ComponentActivity;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
@@ -78,11 +81,11 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends ComponentActivity {
-    private static final int REQUEST_PICK_IMAGE = 1002;
-    private static final int REQUEST_CREATE_OUTPUT = 1003;
-    private static final int PERMISSION_CAMERA = 2001;
     private static final String PREFS = "appraisal_photos";
     private static final String PREF_PHOTOS = "photos";
     private static final String PREF_ADDRESS = "property_address";
@@ -155,10 +158,22 @@ public class MainActivity extends ComponentActivity {
     private String pendingExportLabel = "";
     private boolean updatingSymbolControls;
 
+    // 사진 picker / 출력 파일 생성 / 카메라 권한 요청을 새로운 ActivityResult API 로 처리.
+    // 반드시 onCreate 에서 등록(혹은 필드 초기화 시점)되어야 한다.
+    private ActivityResultLauncher<String[]> pickImageLauncher;
+    private ActivityResultLauncher<Intent> createOutputLauncher;
+    private ActivityResultLauncher<String> cameraPermissionLauncher;
+
+    // 익스포트(PPTX/PDF/JPG 생성 + 파일 IO)를 백그라운드 스레드에서 처리해 ANR 방지.
+    private final ExecutorService exportExecutor = Executors.newSingleThreadExecutor();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private volatile boolean exportInProgress;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        registerActivityResultLaunchers();
         loadPhotos();
         loadAppMode();
         loadPropertyAddress();
@@ -175,6 +190,12 @@ public class MainActivity extends ComponentActivity {
     protected void onPause() {
         super.onPause();
         saveControlState();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        exportExecutor.shutdownNow();
     }
 
     @Override
@@ -1048,9 +1069,55 @@ public class MainActivity extends ComponentActivity {
         return new NextSymbol(symbols[symbols.length - 1], "");
     }
 
+    private void registerActivityResultLaunchers() {
+        // 갤러리/문서 선택: ACTION_OPEN_DOCUMENT 와 동일하게 영구 읽기 권한 획득.
+        pickImageLauncher = registerForActivityResult(
+                new ActivityResultContracts.OpenDocument(),
+                uri -> {
+                    if (uri == null) return;
+                    try {
+                        getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    } catch (SecurityException ignored) {
+                        // 일부 갤러리 앱은 임시 접근만 부여한다.
+                    }
+                    addPhoto(uri.toString());
+                }
+        );
+
+        // 출력 파일 생성: ACTION_CREATE_DOCUMENT 인텐트는 호출 시점마다 mime 이 달라
+        // CreateDocument 컨트랙트 대신 StartActivityForResult 로 기존 인텐트 그대로 사용.
+        createOutputLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(),
+                result -> {
+                    if (result.getResultCode() != RESULT_OK) {
+                        // 사용자가 취소한 경우 임시 바이트 정리.
+                        pendingExportBytes = null;
+                        pendingExportLabel = "";
+                        return;
+                    }
+                    Intent data = result.getData();
+                    if (data != null && data.getData() != null) {
+                        writePendingExport(data.getData());
+                    }
+                }
+        );
+
+        // 카메라 권한 요청.
+        cameraPermissionLauncher = registerForActivityResult(
+                new ActivityResultContracts.RequestPermission(),
+                granted -> {
+                    if (granted) {
+                        startCameraPreview();
+                    } else {
+                        Toast.makeText(this, "카메라 권한이 필요합니다.", Toast.LENGTH_SHORT).show();
+                    }
+                }
+        );
+    }
+
     private void requestCameraPreview() {
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.CAMERA}, PERMISSION_CAMERA);
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA);
             return;
         }
         startCameraPreview();
@@ -1079,51 +1146,12 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void pickImage() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.setType("image/*");
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-        startActivityForResult(intent, REQUEST_PICK_IMAGE);
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == PERMISSION_CAMERA) {
-            if (hasCameraGrant(permissions, grantResults)) {
-                startCameraPreview();
-            } else {
-                Toast.makeText(this, "카메라 권한이 필요합니다.", Toast.LENGTH_SHORT).show();
-            }
-        }
-    }
-
-    @SuppressLint("WrongConstant")
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-
-        if (requestCode == REQUEST_PICK_IMAGE && resultCode == RESULT_OK && data != null && data.getData() != null) {
-            Uri uri = data.getData();
-            if ((data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
-                try {
-                    getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                } catch (SecurityException ignored) {
-                    // Some gallery apps return temporary access only.
-                }
-            }
-            addPhoto(uri.toString());
-            return;
-        }
-
-        if (requestCode == REQUEST_CREATE_OUTPUT && resultCode == RESULT_OK && data != null && data.getData() != null) {
-            writePendingExport(data.getData());
-        }
+        pickImageLauncher.launch(new String[]{"image/*"});
     }
 
     private void capturePhoto() {
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.CAMERA}, PERMISSION_CAMERA);
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA);
             return;
         }
 
@@ -1150,7 +1178,7 @@ public class MainActivity extends ComponentActivity {
                 if (savedUri == null) {
                     savedUri = Uri.fromFile(outputFile);
                 }
-                compressSavedImage(savedUri);
+                compressSavedImage(savedUri, capturedAt);
                 addPhoto(savedUri.toString(), capturedAt, false);
             }
 
@@ -1188,7 +1216,7 @@ public class MainActivity extends ComponentActivity {
         return name.length() > 80 ? name.substring(0, 80) : name;
     }
 
-    private void compressSavedImage(Uri uri) {
+    private void compressSavedImage(Uri uri, long capturedAt) {
         Bitmap bitmap = null;
         Bitmap oriented = null;
         try {
@@ -1203,11 +1231,31 @@ public class MainActivity extends ComponentActivity {
                 }
                 oriented.compress(Bitmap.CompressFormat.JPEG, 78, output);
             }
+            // 새로 작성된 JPEG에는 원본 EXIF가 없으므로 촬영 시각을 다시 기록한다.
+            // 자체감정/현지답사 사진의 시간 신뢰성 확보용.
+            preserveExifDateTime(uri, capturedAt);
         } catch (IOException e) {
             Toast.makeText(this, "사진 용량 줄이기에 실패했습니다.", Toast.LENGTH_SHORT).show();
         } finally {
             if (oriented != null && oriented != bitmap) oriented.recycle();
             if (bitmap != null) bitmap.recycle();
+        }
+    }
+
+    /**
+     * compressSavedImage 가 새로 쓴 JPEG 의 EXIF 에 촬영 시각을 기록한다.
+     * 파일(file://) URI 만 안전하게 처리; content URI 는 seekable FD 가 보장되지 않아 건너뜀.
+     */
+    private void preserveExifDateTime(Uri uri, long capturedAt) {
+        if (!"file".equals(uri.getScheme()) || uri.getPath() == null) return;
+        try {
+            ExifInterface exif = new ExifInterface(uri.getPath());
+            String exifTime = new SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).format(new Date(capturedAt));
+            exif.setAttribute(ExifInterface.TAG_DATETIME, exifTime);
+            exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, exifTime);
+            exif.saveAttributes();
+        } catch (IOException ignored) {
+            // EXIF 보존 실패는 사진 자체 사용에는 영향 없으므로 조용히 무시.
         }
     }
 
@@ -1273,15 +1321,6 @@ public class MainActivity extends ComponentActivity {
         return Bitmap.createBitmap(source, 0, 0, source.getWidth(), source.getHeight(), matrix, true);
     }
 
-    private boolean hasCameraGrant(String[] permissions, int[] grantResults) {
-        for (int i = 0; i < permissions.length && i < grantResults.length; i++) {
-            if (Manifest.permission.CAMERA.equals(permissions[i])) {
-                return grantResults[i] == PackageManager.PERMISSION_GRANTED;
-            }
-        }
-        return checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
-    }
-
     private void addPhoto(String uri) {
         addPhoto(uri, System.currentTimeMillis(), false);
     }
@@ -1293,7 +1332,7 @@ public class MainActivity extends ComponentActivity {
     private void addPhoto(String uri, long createdAt, boolean stamped) {
         String symbol = selectedSymbol();
         PhotoItem item = new PhotoItem();
-        item.id = String.valueOf(createdAt) + "-" + Math.round(Math.random() * 100000);
+        item.id = UUID.randomUUID().toString();
         item.category = isFieldSurveyMode() ? CATEGORY_FIELD : currentCategory;
         item.symbol = symbol;
         item.memo = memoInput.getText().toString().trim();
@@ -1536,31 +1575,57 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void exportOutput(String format) {
-        // 사진이 많으면 메인 스레드에서 수 초 걸릴 수 있어 사용자에게 진행 중임을 즉시 알림.
-        // (본격적 백그라운드 처리는 후속 PR에서.)
-        Toast.makeText(this, formatLabel(format) + " 사진자료를 만드는 중입니다…", Toast.LENGTH_SHORT).show();
-
-        try {
-            if (FORMAT_JPG.equals(format)) {
-                ArrayList<ExportFile> jpgFiles = createJpgFiles();
-                writePublicFiles(jpgFiles);
-                Toast.makeText(this, "JPG 사진자료를 저장했습니다.", Toast.LENGTH_LONG).show();
-                return;
-            }
-
-            pendingExportBytes = createOutputBytes(format);
-            pendingExportLabel = formatLabel(format);
-        } catch (IOException e) {
-            Toast.makeText(this, formatLabel(format) + " 파일을 만들 수 없습니다.", Toast.LENGTH_LONG).show();
+        if (exportInProgress) {
+            Toast.makeText(this, "이미 사진자료를 만드는 중입니다.", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        String fileName = outputFileName(format);
-        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType(mimeForFormat(format));
-        intent.putExtra(Intent.EXTRA_TITLE, fileName);
-        startActivityForResult(intent, REQUEST_CREATE_OUTPUT);
+        // 비트맵 디코드/JPEG 인코드는 사진이 많을수록 수 초씩 걸려 ANR 위험.
+        // 메인 스레드는 토스트만 띄우고 실제 작업은 백그라운드 스레드에서 수행한다.
+        Toast.makeText(this, formatLabel(format) + " 사진자료를 만드는 중입니다…", Toast.LENGTH_SHORT).show();
+        exportInProgress = true;
+
+        exportExecutor.submit(() -> {
+            try {
+                if (FORMAT_JPG.equals(format)) {
+                    ArrayList<ExportFile> jpgFiles = createJpgFiles();
+                    writePublicFiles(jpgFiles);
+                    runOnUiSafely(() -> {
+                        exportInProgress = false;
+                        Toast.makeText(MainActivity.this, "JPG 사진자료를 저장했습니다.", Toast.LENGTH_LONG).show();
+                    });
+                    return;
+                }
+
+                byte[] bytes = createOutputBytes(format);
+                runOnUiSafely(() -> {
+                    exportInProgress = false;
+                    pendingExportBytes = bytes;
+                    pendingExportLabel = formatLabel(format);
+                    Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType(mimeForFormat(format));
+                    intent.putExtra(Intent.EXTRA_TITLE, outputFileName(format));
+                    createOutputLauncher.launch(intent);
+                });
+            } catch (Exception e) {
+                runOnUiSafely(() -> {
+                    exportInProgress = false;
+                    Toast.makeText(MainActivity.this, formatLabel(format) + " 파일을 만들 수 없습니다.", Toast.LENGTH_LONG).show();
+                });
+            }
+        });
+    }
+
+    /**
+     * 백그라운드 작업이 끝난 시점에 Activity 가 이미 destroy 됐으면 UI 작업을 건너뛴다.
+     * Toast/Intent 호출이 사라진 Activity 컨텍스트를 잡지 않게 하는 안전 가드.
+     */
+    private void runOnUiSafely(Runnable block) {
+        mainHandler.post(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            block.run();
+        });
     }
 
     private byte[] createOutputBytes(String format) throws IOException {
@@ -1770,23 +1835,48 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void shareOutput(String recipient, String format) {
-        // 공유는 익스포트 + 첨부 파일 작성으로 시간이 더 걸릴 수 있음.
-        Toast.makeText(this, formatLabel(format) + " 사진자료를 만드는 중입니다…", Toast.LENGTH_SHORT).show();
+        if (exportInProgress) {
+            Toast.makeText(this, "이미 사진자료를 만드는 중입니다.", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
-        ArrayList<Uri> attachmentUris = new ArrayList<>();
-        try {
-            String mailApp = getSavedMailApp();
-            boolean otherShare = MAIL_APP_OTHER.equals(mailApp);
-            if (FORMAT_JPG.equals(format)) {
-                ArrayList<ExportFile> jpgFiles = createJpgFiles();
-                attachmentUris = otherShare ? writePublicFiles(jpgFiles) : writeCachedFiles(jpgFiles);
-            } else {
-                ExportFile file = new ExportFile(outputFileName(format), mimeForFormat(format), createOutputBytes(format));
-                ArrayList<ExportFile> files = new ArrayList<>();
-                files.add(file);
-                attachmentUris = otherShare ? writePublicFiles(files) : writeCachedFiles(files);
+        Toast.makeText(this, formatLabel(format) + " 사진자료를 만드는 중입니다…", Toast.LENGTH_SHORT).show();
+        exportInProgress = true;
+
+        // mailApp 분기는 메인 스레드에서 결정해서 백그라운드로 넘김.
+        String mailApp = getSavedMailApp();
+        boolean otherShare = MAIL_APP_OTHER.equals(mailApp);
+
+        exportExecutor.submit(() -> {
+            ArrayList<Uri> attachmentUris;
+            try {
+                if (FORMAT_JPG.equals(format)) {
+                    ArrayList<ExportFile> jpgFiles = createJpgFiles();
+                    attachmentUris = otherShare ? writePublicFiles(jpgFiles) : writeCachedFiles(jpgFiles);
+                } else {
+                    ExportFile file = new ExportFile(outputFileName(format), mimeForFormat(format), createOutputBytes(format));
+                    ArrayList<ExportFile> files = new ArrayList<>();
+                    files.add(file);
+                    attachmentUris = otherShare ? writePublicFiles(files) : writeCachedFiles(files);
+                }
+            } catch (Exception e) {
+                runOnUiSafely(() -> {
+                    exportInProgress = false;
+                    Toast.makeText(MainActivity.this, "공유 화면을 열 수 없습니다.", Toast.LENGTH_LONG).show();
+                });
+                return;
             }
 
+            ArrayList<Uri> finalUris = attachmentUris;
+            runOnUiSafely(() -> {
+                exportInProgress = false;
+                launchShareIntent(recipient, format, otherShare, finalUris);
+            });
+        });
+    }
+
+    private void launchShareIntent(String recipient, String format, boolean otherShare, ArrayList<Uri> attachmentUris) {
+        try {
             Intent emailIntent = otherShare
                     ? createShareIntent(attachmentUris, format)
                     : createEmailIntent(recipient, attachmentUris, format);
@@ -2012,7 +2102,9 @@ public class MainActivity extends ComponentActivity {
             for (int i = 0; i < array.length(); i++) {
                 JSONObject object = array.getJSONObject(i);
                 PhotoItem item = new PhotoItem();
-                item.id = object.optString("id");
+                // 구버전(밀리초+random) 포맷도 그대로 유지하고, id 가 비어 있으면 새 UUID 부여.
+                String savedId = object.optString("id");
+                item.id = savedId.isEmpty() ? UUID.randomUUID().toString() : savedId;
                 item.category = object.optString("category", CATEGORY_LAND);
                 item.symbol = object.optString("symbol", "1");
                 item.memo = object.optString("memo");
