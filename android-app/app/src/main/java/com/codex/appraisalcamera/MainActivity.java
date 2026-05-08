@@ -27,9 +27,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
-import android.print.PrintAttributes;
-import android.print.PrintDocumentAdapter;
-import android.print.PrintManager;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
@@ -37,7 +34,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
-import android.webkit.WebView;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -84,7 +80,6 @@ import java.util.Locale;
 import java.util.Set;
 
 public class MainActivity extends ComponentActivity {
-    private static final int REQUEST_CAMERA = 1001;
     private static final int REQUEST_PICK_IMAGE = 1002;
     private static final int REQUEST_CREATE_OUTPUT = 1003;
     private static final int PERMISSION_CAMERA = 2001;
@@ -156,7 +151,6 @@ public class MainActivity extends ComponentActivity {
     private String fieldSurveyor = "";
     private int guideAlphaPercent = 82;
     private int guideScalePercent = 78;
-    private WebView printWebView;
     private byte[] pendingExportBytes;
     private String pendingExportLabel = "";
     private boolean updatingSymbolControls;
@@ -879,7 +873,7 @@ public class MainActivity extends ComponentActivity {
     private void showMailAppDialog() {
         String[] labels = {"Gmail", "Other"};
         String[] values = {MAIL_APP_GMAIL, MAIL_APP_OTHER};
-        int checked = indexOf(values, getSavedMailApp());
+        int checked = indexOfOrDefault(values, getSavedMailApp(), 0);
 
         new AlertDialog.Builder(this)
                 .setTitle("기본 공유 방식")
@@ -974,7 +968,7 @@ public class MainActivity extends ComponentActivity {
             if (targetBase.contains("-")) {
                 targetBase = targetBase.split("-", 2)[0];
             }
-            int baseIndex = indexOfOrDefault(symbols, targetBase, indexOf(symbols, next.base));
+            int baseIndex = indexOfOrDefault(symbols, targetBase, indexOfOrDefault(symbols, next.base, 0));
             symbolSpinner.setSelection(baseIndex);
             currentSymbol = symbols[baseIndex];
 
@@ -986,7 +980,7 @@ public class MainActivity extends ComponentActivity {
             if (targetSub.isEmpty() && rawCurrentSymbol.isEmpty() && !next.sub.isEmpty()) {
                 targetSub = "-" + next.sub;
             }
-            int subIndex = targetSub.isEmpty() ? 0 : indexOf(BUILDING_SUB_SYMBOLS, targetSub);
+            int subIndex = targetSub.isEmpty() ? 0 : indexOfOrDefault(BUILDING_SUB_SYMBOLS, targetSub, 0);
             buildingSubSpinner.setSelection(subIndex);
             currentBuildingSub = subIndex == 0 ? "" : BUILDING_SUB_SYMBOLS[subIndex];
         } finally {
@@ -1082,19 +1076,6 @@ public class MainActivity extends ComponentActivity {
                 Toast.makeText(this, "카메라 시작에 실패했습니다.", Toast.LENGTH_SHORT).show();
             }
         }, ContextCompat.getMainExecutor(this));
-    }
-
-    private Uri createCameraImageUri() {
-        return getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cameraContentValues());
-    }
-
-    private ContentValues cameraContentValues() {
-        ContentValues values = new ContentValues();
-        values.put(MediaStore.Images.Media.DISPLAY_NAME, "appraisal_" + System.currentTimeMillis() + ".jpg");
-        values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
-        values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/AppraisalCamera");
-        values.put(MediaStore.Images.Media.IS_PENDING, 1);
-        return values;
     }
 
     private void pickImage() {
@@ -1207,32 +1188,6 @@ public class MainActivity extends ComponentActivity {
         return name.length() > 80 ? name.substring(0, 80) : name;
     }
 
-    private void stampSavedImage(Uri uri, long capturedAt) {
-        Bitmap bitmap = null;
-        Bitmap oriented = null;
-        Bitmap stamped = null;
-        try {
-            bitmap = decodeBitmap(uri, 3200);
-            if (bitmap == null) {
-                throw new IOException("Cannot decode captured image");
-            }
-            oriented = rotateBitmap(bitmap, readExifOrientation(uri));
-            stamped = drawTimestamp(oriented, "촬영: " + formatDate(capturedAt));
-            try (OutputStream output = getContentResolver().openOutputStream(uri, "w")) {
-                if (output == null) {
-                    throw new IOException("Cannot open captured image for writing");
-                }
-                stamped.compress(Bitmap.CompressFormat.JPEG, 92, output);
-            }
-        } catch (IOException e) {
-            Toast.makeText(this, "원본 사진 시간표시 저장에 실패했습니다.", Toast.LENGTH_SHORT).show();
-        } finally {
-            if (stamped != null && stamped != oriented) stamped.recycle();
-            if (oriented != null && oriented != bitmap) oriented.recycle();
-            if (bitmap != null) bitmap.recycle();
-        }
-    }
-
     private void compressSavedImage(Uri uri) {
         Bitmap bitmap = null;
         Bitmap oriented = null;
@@ -1316,42 +1271,6 @@ public class MainActivity extends ComponentActivity {
         Matrix matrix = new Matrix();
         matrix.postRotate(degrees);
         return Bitmap.createBitmap(source, 0, 0, source.getWidth(), source.getHeight(), matrix, true);
-    }
-
-    private Bitmap drawTimestamp(Bitmap source, String stampText) {
-        Bitmap output = source.copy(Bitmap.Config.ARGB_8888, true);
-        Canvas canvas = new Canvas(output);
-
-        float textSize = Math.max(32f, output.getWidth() * 0.025f);
-        float paddingX = textSize * 0.55f;
-        float paddingY = textSize * 0.32f;
-        float margin = textSize * 0.55f;
-
-        Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
-        textPaint.setColor(Color.WHITE);
-        textPaint.setTextSize(textSize);
-        textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-
-        Rect bounds = new Rect();
-        textPaint.getTextBounds(stampText, 0, stampText.length(), bounds);
-        Paint.FontMetrics metrics = textPaint.getFontMetrics();
-
-        float boxW = bounds.width() + paddingX * 2f;
-        float boxH = (metrics.descent - metrics.ascent) + paddingY * 2f;
-        float left = output.getWidth() - boxW - margin;
-        float top = output.getHeight() - boxH - margin;
-
-        Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        bgPaint.setColor(Color.argb(175, 0, 0, 0));
-        canvas.drawRect(new RectF(left, top, left + boxW, top + boxH), bgPaint);
-        canvas.drawText(stampText, left + paddingX, top + paddingY - metrics.ascent, textPaint);
-        return output;
-    }
-
-    private void markImageReady(Uri uri) {
-        ContentValues values = new ContentValues();
-        values.put(MediaStore.Images.Media.IS_PENDING, 0);
-        getContentResolver().update(uri, values, null, null);
     }
 
     private boolean hasCameraGrant(String[] permissions, int[] grantResults) {
@@ -1578,7 +1497,7 @@ public class MainActivity extends ComponentActivity {
         }
 
         if (CATEGORY_EXTRA.equals(photo.category)) {
-            return indexOf(EXTRA_SYMBOLS, photo.symbol);
+            return indexOfOrDefault(EXTRA_SYMBOLS, photo.symbol, 9999);
         }
 
         return 0;
@@ -1602,30 +1521,6 @@ public class MainActivity extends ComponentActivity {
                 .show();
     }
 
-    private void printOutput() {
-        if (photos.isEmpty()) {
-            Toast.makeText(this, "인쇄할 사진이 없습니다.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        printWebView = new WebView(this);
-        printWebView.getSettings().setAllowContentAccess(true);
-        printWebView.getSettings().setAllowFileAccess(true);
-        printWebView.getSettings().setJavaScriptEnabled(false);
-        printWebView.getSettings().setBlockNetworkLoads(true);
-        printWebView.getSettings().setAllowFileAccessFromFileURLs(false);
-        printWebView.getSettings().setAllowUniversalAccessFromFileURLs(false);
-        printWebView.setWebViewClient(new android.webkit.WebViewClient() {
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                PrintManager printManager = (PrintManager) getSystemService(PRINT_SERVICE);
-                PrintDocumentAdapter adapter = view.createPrintDocumentAdapter(modeLabel() + "_사진출력자료");
-                printManager.print(documentHeaderText() + " 사진 출력자료", adapter, new PrintAttributes.Builder().build());
-            }
-        });
-        printWebView.loadDataWithBaseURL(null, buildPrintHtml(), "text/html", "UTF-8", null);
-    }
-
     private void showExportFormatDialog() {
         if (photos.isEmpty()) {
             Toast.makeText(this, "저장할 사진이 없습니다.", Toast.LENGTH_SHORT).show();
@@ -1641,6 +1536,10 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void exportOutput(String format) {
+        // 사진이 많으면 메인 스레드에서 수 초 걸릴 수 있어 사용자에게 진행 중임을 즉시 알림.
+        // (본격적 백그라운드 처리는 후속 PR에서.)
+        Toast.makeText(this, formatLabel(format) + " 사진자료를 만드는 중입니다…", Toast.LENGTH_SHORT).show();
+
         try {
             if (FORMAT_JPG.equals(format)) {
                 ArrayList<ExportFile> jpgFiles = createJpgFiles();
@@ -1871,6 +1770,9 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void shareOutput(String recipient, String format) {
+        // 공유는 익스포트 + 첨부 파일 작성으로 시간이 더 걸릴 수 있음.
+        Toast.makeText(this, formatLabel(format) + " 사진자료를 만드는 중입니다…", Toast.LENGTH_SHORT).show();
+
         ArrayList<Uri> attachmentUris = new ArrayList<>();
         try {
             String mailApp = getSavedMailApp();
@@ -2099,56 +2001,6 @@ public class MainActivity extends ComponentActivity {
     private String mailAppLabel(String mailApp) {
         if (MAIL_APP_GMAIL.equals(mailApp)) return "Gmail";
         return "Other";
-    }
-
-    private String buildPrintHtml() {
-        StringBuilder html = new StringBuilder();
-        html.append("<!doctype html><html><head><meta charset='utf-8'>");
-        html.append("<style>");
-        html.append("@page{size:A4;margin:12mm}");
-        html.append("body{font-family:sans-serif;color:#111;margin:0}");
-        html.append(".page{page-break-after:always;break-after:page;position:relative;height:273mm}");
-        html.append(".page:last-child{page-break-after:auto;break-after:auto}");
-        html.append(".docno{position:absolute;left:0;top:0;font-size:11pt}.page-no{position:absolute;right:0;top:34mm;font-size:10pt}");
-        html.append("h1{position:absolute;left:0;right:0;top:22mm;margin:0;text-align:center;font-size:18pt;letter-spacing:6px}");
-        html.append(".card{position:absolute;left:31mm;width:128mm;height:68mm;break-inside:avoid}");
-        html.append(".card.top{top:56mm}.card.bottom{top:156mm}");
-        html.append(".frame{position:relative;width:100%;height:100%;background:#f5f5f5;overflow:hidden}");
-        html.append("img{width:100%;height:100%;object-fit:cover;display:block}");
-        html.append(".stamp{position:absolute;right:3mm;bottom:3mm;background:rgba(0,0,0,.72);color:#fff;padding:1.5mm 2.2mm;text-align:right;font-size:8.5pt}");
-        html.append(".caption{text-align:center;font-size:11pt;margin-top:5mm}");
-        html.append(".office{position:absolute;right:0;bottom:0;font-size:10pt}");
-        html.append("</style></head><body>");
-
-        ArrayList<PhotoItem> sorted = sortedPhotos();
-        for (int i = 0; i < sorted.size(); i += 2) {
-            html.append("<section class='page'>");
-            html.append("<div class='docno'>").append(escapeHtml(documentHeaderText())).append("</div>");
-            html.append("<h1>사 진 용 지</h1>");
-            html.append("<div class='page-no'>Page : ").append((i / 2) + 1).append("</div>");
-            appendPrintCard(html, sorted.get(i), true);
-            if (i + 1 < sorted.size()) {
-                appendPrintCard(html, sorted.get(i + 1), false);
-            }
-            html.append("<div class='office'>Page : ").append((i / 2) + 1).append("</div>");
-            html.append("</section>");
-        }
-
-        html.append("</body></html>");
-        return html.toString();
-    }
-
-    private void appendPrintCard(StringBuilder html, PhotoItem photo, boolean top) {
-        html.append("<article class='card ").append(top ? "top" : "bottom").append("'>");
-        html.append("<div class='frame'>");
-        html.append("<img src='").append(escapeHtml(photo.uri)).append("'>");
-        String stampText = displayPhotoStamp(photo);
-        if (!stampText.isEmpty()) {
-            html.append("<div class='stamp'>").append(escapeHtml(stampText).replace("\n", "<br>")).append("</div>");
-        }
-        html.append("</div>");
-        html.append("<div class='caption'>").append(escapeHtml(photoCaption(photo))).append("</div>");
-        html.append("</article>");
     }
 
     private void loadPhotos() {
@@ -2395,7 +2247,7 @@ public class MainActivity extends ComponentActivity {
         for (int i = 0; i < values.length; i++) {
             if (values[i].equals(target)) return i;
         }
-        return 0;
+        return -1;
     }
 
     private static int indexOfOrDefault(String[] values, String target, int fallback) {
@@ -2403,15 +2255,6 @@ public class MainActivity extends ComponentActivity {
             if (values[i].equals(target)) return i;
         }
         return fallback;
-    }
-
-    private static String escapeHtml(String value) {
-        return value
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
     }
 
     private int dp(int value) {

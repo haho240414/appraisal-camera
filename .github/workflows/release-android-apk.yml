@@ -5,6 +5,20 @@ on:
   push:
     branches:
       - main
+    # 웹 프리뷰/문서 변경은 Android APK 빌드와 무관하므로 빌드 트리거에서 제외.
+    paths-ignore:
+      - "**/*.md"
+      - "*.html"
+      - "*.css"
+      - "app.js"
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+      - "*.html"
+      - "*.css"
+      - "app.js"
 
 permissions:
   contents: write
@@ -18,6 +32,11 @@ jobs:
     name: Build and publish APK
     runs-on: ubuntu-22.04
     timeout-minutes: 20
+
+    env:
+      # versionCode 는 run number 로 자동 증가 → 사용자 OS가 정상 업데이트로 인식.
+      APP_VERSION_CODE: ${{ github.run_number }}
+      APP_VERSION_NAME: 1.0.${{ github.run_number }}
 
     steps:
       - name: Checkout
@@ -46,19 +65,37 @@ jobs:
         continue-on-error: true
         run: gradle :app:lintDebug --no-daemon
 
+      - name: Locate universal APK
+        id: locate
+        run: |
+          # ABI splits + universalApk=true 사용 시 universal 파일명이 환경에 따라 달라질 수 있어 동적 탐색.
+          APK_DIR="android-app/app/build/outputs/apk/debug"
+          APK="$(ls "$APK_DIR"/app-universal-debug.apk 2>/dev/null || ls "$APK_DIR"/app-debug.apk)"
+          test -s "$APK"
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+
       - name: Verify APK package metadata
         run: |
-          APK="android-app/app/build/outputs/apk/debug/app-debug.apk"
-          test -s "$APK"
+          APK="${{ steps.locate.outputs.apk }}"
           AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           "$AAPT" dump badging "$APK" | tee apk-badging.txt
           grep "package: name='com.codex.appraisalcamera'" apk-badging.txt
           grep "launchable-activity: name='com.codex.appraisalcamera.MainActivity'" apk-badging.txt
+          grep "versionCode='${APP_VERSION_CODE}'" apk-badging.txt
 
       - name: Prepare APK
-        run: cp android-app/app/build/outputs/apk/debug/app-debug.apk appraisalcamera-camera-screen.apk
+        run: cp "${{ steps.locate.outputs.apk }}" appraisalcamera-camera-screen.apk
+
+      - name: Upload APK artifact (PR 검증용)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: appraisalcamera-camera-screen-apk-${{ github.run_number }}
+          path: appraisalcamera-camera-screen.apk
+          if-no-files-found: error
 
       - name: Create GitHub Release
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
