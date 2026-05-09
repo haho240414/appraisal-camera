@@ -1,0 +1,1438 @@
+package com.codex.appraisalcamera
+
+import android.Manifest
+import android.app.AlertDialog
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ContentValues
+import android.content.Intent
+import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.graphics.pdf.PdfDocument
+import android.media.ExifInterface
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.Environment
+import android.os.Handler
+import android.os.Looper
+import android.provider.MediaStore
+import android.view.WindowManager
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.SeekBar
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import com.codex.appraisalcamera.ui.CameraScreen
+import com.codex.appraisalcamera.ui.theme.AppraisalCameraTheme
+import org.json.JSONArray
+import org.json.JSONException
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.HashSet
+import java.util.Locale
+import java.util.UUID
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+
+/**
+ * Phase D2 — Compose UI 도입.
+ *
+ * - Activity 는 비즈니스 로직(촬영/사진 관리/익스포트/공유/SharedPreferences) 보유.
+ * - UI 는 [setContent] 로 [CameraScreen] Composable 이 그린다.
+ * - UI 가 관찰해야 할 상태는 모두 [mutableStateOf] / [mutableStateListOf].
+ * - 다이얼로그(설정/도움말/저장형식/공유형식/모드/물건지/사진목록 등)는 D2 에선
+ *   기존 AlertDialog.Builder 그대로. D3 에서 Compose 로 전환.
+ */
+class MainActivity : ComponentActivity() {
+
+    // ---- UI-driving observable state (Compose 가 읽음) ----
+    var currentCategory by mutableStateOf(CATEGORY_LAND)
+    var currentSymbol by mutableStateOf("")
+    var currentBuildingSub by mutableStateOf("")
+    var currentMemo by mutableStateOf("")
+    var propertyAddress by mutableStateOf("")
+    var appMode by mutableStateOf(MODE_SELF_APPRAISAL)
+    var debtorName by mutableStateOf("")
+    var fieldSurveyor by mutableStateOf("")
+    val photos: SnapshotStateList<PhotoItem> = mutableStateListOf()
+
+    // ---- Non-UI state ----
+    private var imageCapture: ImageCapture? = null
+    private var pendingExportBytes: ByteArray? = null
+    private var pendingExportLabel: String = ""
+    private var guideAlphaPercent: Int = 82
+    private var guideScalePercent: Int = 78
+
+    // ActivityResult launchers
+    private lateinit var pickImageLauncher: ActivityResultLauncher<Array<String>>
+    private lateinit var createOutputLauncher: ActivityResultLauncher<Intent>
+    private lateinit var cameraPermissionLauncher: ActivityResultLauncher<String>
+
+    // 백그라운드 익스포트
+    private val exportExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    @Volatile private var exportInProgress: Boolean = false
+
+    // ---- Lifecycle ----
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+
+        registerActivityResultLaunchers()
+        loadPhotos()
+        loadAppMode()
+        loadPropertyAddress()
+        loadFieldSurveyInfo()
+        loadGuideSettings()
+        restoreControlState(savedInstanceState)
+
+        setContent {
+            AppraisalCameraTheme {
+                CameraScreen(activity = this)
+            }
+        }
+
+        requestCameraPreview()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        saveControlState()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        exportExecutor.shutdownNow()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString(STATE_CURRENT_CATEGORY, currentCategory)
+        outState.putString(STATE_CURRENT_SYMBOL, currentSymbol)
+        outState.putString(STATE_CURRENT_BUILDING_SUB, currentBuildingSub)
+        outState.putString(STATE_CURRENT_MEMO, currentMemo)
+        super.onSaveInstanceState(outState)
+    }
+
+    // ---- Activity result launchers ----
+
+    private fun registerActivityResultLaunchers() {
+        pickImageLauncher = registerForActivityResult(
+            ActivityResultContracts.OpenDocument()
+        ) { uri ->
+            if (uri == null) return@registerForActivityResult
+            try {
+                contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: SecurityException) {
+                // 일부 갤러리 앱은 임시 접근만 부여.
+            }
+            addPhoto(uri.toString())
+        }
+
+        createOutputLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode != RESULT_OK) {
+                pendingExportBytes = null
+                pendingExportLabel = ""
+                return@registerForActivityResult
+            }
+            val data = result.data
+            data?.data?.let { writePendingExport(it) }
+        }
+
+        cameraPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            if (granted) {
+                startCameraPreview()
+            } else {
+                Toast.makeText(this, "카메라 권한이 필요합니다.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // ---- Camera ----
+
+    /**
+     * Compose 의 AndroidView 안에서 PreviewView 가 만들어지면 호출되도록.
+     * Activity 가 PreviewView 를 잡아두고 binding 한다.
+     */
+    fun bindCameraPreview(previewView: PreviewView) {
+        cameraPreviewView = previewView
+        requestCameraPreview()
+    }
+
+    private var cameraPreviewView: PreviewView? = null
+
+    private fun requestCameraPreview() {
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            return
+        }
+        startCameraPreview()
+    }
+
+    private fun startCameraPreview() {
+        val previewView = cameraPreviewView ?: return
+        val providerFuture = ProcessCameraProvider.getInstance(this)
+        providerFuture.addListener({
+            try {
+                val provider = providerFuture.get()
+                val preview = Preview.Builder().build()
+                val capture = ImageCapture.Builder()
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                    .setJpegQuality(75)
+                    .build()
+                preview.surfaceProvider = previewView.surfaceProvider
+
+                provider.unbindAll()
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture)
+                imageCapture = capture
+            } catch (_: Exception) {
+                Toast.makeText(this, "카메라 시작에 실패했습니다.", Toast.LENGTH_SHORT).show()
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    fun pickImage() {
+        pickImageLauncher.launch(arrayOf("image/*"))
+    }
+
+    fun capturePhoto() {
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            return
+        }
+
+        val capture = imageCapture
+        if (capture == null) {
+            Toast.makeText(this, "카메라 준비 중입니다. 잠시 후 다시 촬영하세요.", Toast.LENGTH_SHORT).show()
+            startCameraPreview()
+            return
+        }
+
+        val capturedAt = System.currentTimeMillis()
+        val outputFile = try {
+            createAppImageFile(capturedAt)
+        } catch (e: IOException) {
+            Toast.makeText(this, "앱 내부 사진 저장 폴더를 만들 수 없습니다.", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val options = ImageCapture.OutputFileOptions.Builder(outputFile).build()
+        capture.takePicture(options, ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
+            override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                val savedUri = outputFileResults.savedUri ?: Uri.fromFile(outputFile)
+                compressSavedImage(savedUri, capturedAt)
+                addPhoto(savedUri.toString(), capturedAt, false)
+            }
+
+            override fun onError(exception: ImageCaptureException) {
+                Toast.makeText(this@MainActivity, "촬영 저장에 실패했습니다.", Toast.LENGTH_SHORT).show()
+            }
+        })
+    }
+
+    @Throws(IOException::class)
+    private fun createAppImageFile(capturedAt: Long): File {
+        var picturesRoot = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+        if (picturesRoot == null) {
+            picturesRoot = File(filesDir, "Pictures")
+        }
+        val addressDir = File(File(picturesRoot, "AppraisalCamera"), propertyFolderName())
+        if (!addressDir.exists() && !addressDir.mkdirs()) {
+            throw IOException("Cannot create app photo directory")
+        }
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.KOREA).format(Date(capturedAt))
+        return File(addressDir, "appraisal_$timestamp.jpg")
+    }
+
+    private fun propertyFolderName(): String {
+        var name = documentHeaderText()
+        if (modeDefaultTitle() == name) name = "미지정_물건지"
+        name = name.replace(Regex("[\\\\/:*?\"<>|\\r\\n]+"), "_").trim()
+        if (name.isEmpty()) return "미지정_물건지"
+        return if (name.length > 80) name.substring(0, 80) else name
+    }
+
+    // ---- Image processing ----
+
+    private fun compressSavedImage(uri: Uri, capturedAt: Long) {
+        var bitmap: Bitmap? = null
+        var oriented: Bitmap? = null
+        try {
+            bitmap = decodeBitmap(uri, 1800)
+            if (bitmap == null) throw IOException("Cannot decode captured image")
+            oriented = rotateBitmap(bitmap, readExifOrientation(uri))
+            openImageOutputStream(uri)?.use { output ->
+                oriented.compress(Bitmap.CompressFormat.JPEG, 78, output)
+            } ?: throw IOException("Cannot open captured image for writing")
+            preserveExifDateTime(uri, capturedAt)
+        } catch (_: IOException) {
+            Toast.makeText(this, "사진 용량 줄이기에 실패했습니다.", Toast.LENGTH_SHORT).show()
+        } finally {
+            if (oriented != null && oriented !== bitmap) oriented.recycle()
+            bitmap?.recycle()
+        }
+    }
+
+    private fun preserveExifDateTime(uri: Uri, capturedAt: Long) {
+        if (uri.scheme != "file" || uri.path == null) return
+        try {
+            val exif = ExifInterface(uri.path!!)
+            val exifTime = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).format(Date(capturedAt))
+            exif.setAttribute(ExifInterface.TAG_DATETIME, exifTime)
+            exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, exifTime)
+            exif.saveAttributes()
+        } catch (_: IOException) {
+            // EXIF 보존 실패는 사진 사용에 영향 없으므로 조용히 무시.
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun openImageOutputStream(uri: Uri): OutputStream? {
+        if (uri.scheme == "file" && uri.path != null) {
+            return FileOutputStream(File(uri.path!!))
+        }
+        return contentResolver.openOutputStream(uri, "w")
+    }
+
+    @Throws(IOException::class)
+    private fun decodeBitmap(uri: Uri, maxSideLimit: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        contentResolver.openInputStream(uri)?.use { input ->
+            BitmapFactory.decodeStream(input, null, bounds)
+        } ?: return null
+
+        val maxSide = maxOf(bounds.outWidth, bounds.outHeight)
+        var sample = 1
+        while (maxSide / sample > maxSideLimit) sample *= 2
+
+        val options = BitmapFactory.Options().apply { inSampleSize = sample }
+        contentResolver.openInputStream(uri)?.use { input ->
+            return BitmapFactory.decodeStream(input, null, options)
+        }
+        return null
+    }
+
+    private fun readExifOrientation(uri: Uri): Int {
+        try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                val exif = ExifInterface(input)
+                return exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+            }
+        } catch (_: IOException) {
+        }
+        return ExifInterface.ORIENTATION_NORMAL
+    }
+
+    private fun rotateBitmap(source: Bitmap, orientation: Int): Bitmap {
+        val degrees = when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270
+            else -> return source
+        }
+        val matrix = Matrix().apply { postRotate(degrees.toFloat()) }
+        return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+    }
+
+    // ---- Photo lifecycle ----
+
+    @JvmOverloads
+    fun addPhoto(uri: String, createdAt: Long = System.currentTimeMillis(), stamped: Boolean = false) {
+        val symbol = selectedSymbol()
+        val item = PhotoItem(
+            id = UUID.randomUUID().toString(),
+            category = if (isFieldSurveyMode()) CATEGORY_FIELD else currentCategory,
+            symbol = symbol,
+            memo = currentMemo.trim(),
+            uri = uri,
+            createdAt = createdAt,
+            stamped = stamped,
+            debtorName = if (isFieldSurveyMode()) debtorName.trim() else "",
+            fieldSurveyor = if (isFieldSurveyMode()) fieldSurveyor.trim() else ""
+        )
+        photos.add(item)
+
+        currentMemo = ""
+        if (currentCategory != CATEGORY_CUSTOM && !isFieldSurveyMode()) {
+            currentSymbol = ""
+        }
+        currentBuildingSub = ""
+        savePhotos()
+        saveControlState()
+        Toast.makeText(this, "${photoTitle(item)} 등록", Toast.LENGTH_SHORT).show()
+    }
+
+    fun deletePhoto(item: PhotoItem) {
+        photos.remove(item)
+        deleteAppPhotoFile(item)
+        savePhotos()
+    }
+
+    fun confirmClear() {
+        if (photos.isEmpty()) return
+        AlertDialog.Builder(this)
+            .setTitle("전체 삭제")
+            .setMessage("등록된 사진 목록을 모두 삭제할까요?")
+            .setPositiveButton("삭제") { _, _ ->
+                photos.toList().forEach { deleteAppPhotoFile(it) }
+                photos.clear()
+                savePhotos()
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    fun sortedPhotos(): List<PhotoItem> {
+        return photos.sortedWith(compareBy({ categoryRank(it.category) }, { symbolRank(it) }, { it.createdAt }))
+    }
+
+    private fun categoryRank(category: String): Int {
+        for (i in CATEGORY_ORDER.indices) if (CATEGORY_ORDER[i] == category) return i
+        return 99
+    }
+
+    private fun symbolRank(photo: PhotoItem): Int {
+        if (photo.category == CATEGORY_FIELD || photo.category == CATEGORY_LAND) {
+            return photo.symbol.toIntOrNull() ?: 9999
+        }
+        if (photo.category == CATEGORY_BUILDING) {
+            val parts = photo.symbol.split("-")
+            val baseRank = indexOf(BUILDING_SYMBOLS, parts[0])
+            val subRank = if (parts.size > 1) parts[1].toIntOrNull() ?: 99 else 0
+            return (if (baseRank < 0) 99 else baseRank) * 100 + subRank
+        }
+        if (photo.category == CATEGORY_EXTRA) {
+            return indexOfOrDefault(EXTRA_SYMBOLS, photo.symbol, 9999)
+        }
+        return 0
+    }
+
+    private fun deleteAppPhotoFile(photo: PhotoItem) {
+        try {
+            val uri = Uri.parse(photo.uri)
+            if (uri.scheme != "file" || uri.path == null) return
+            val file = File(uri.path!!)
+            val filePath = file.canonicalPath
+            val externalRoot = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+            val internalRoot = File(filesDir, "Pictures")
+            val appOwned = startsWithRoot(filePath, externalRoot) || startsWithRoot(filePath, internalRoot)
+            if (appOwned && file.exists()) file.delete()
+        } catch (_: IOException) {
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun startsWithRoot(filePath: String, root: File?): Boolean {
+        if (root == null) return false
+        val rootPath = root.canonicalPath
+        return filePath == rootPath || filePath.startsWith(rootPath + File.separator)
+    }
+
+    // ---- Symbol selection logic ----
+
+    fun selectedSymbol(): String {
+        if (isFieldSurveyMode()) return nextFieldPhotoNumber().toString()
+        if (currentCategory == CATEGORY_CUSTOM) {
+            return if (currentSymbol.isEmpty()) "기타사항" else currentSymbol
+        }
+        val base = if (currentSymbol.isEmpty()) nextSymbol(currentCategory).base else currentSymbol
+        if (currentCategory != CATEGORY_BUILDING) return base
+        return if (currentBuildingSub.isEmpty()) base else base + currentBuildingSub
+    }
+
+    private fun nextFieldPhotoNumber(): Int {
+        var max = 0
+        for (photo in photos) {
+            if (photo.category == CATEGORY_FIELD) {
+                max = maxOf(max, photo.symbol.toIntOrNull() ?: (max + 1))
+            }
+        }
+        return max + 1
+    }
+
+    fun nextSymbol(category: String): NextSymbol {
+        val used = HashSet<String>()
+        for (photo in photos) if (photo.category == category) used.add(photo.symbol)
+
+        if (category == CATEGORY_BUILDING) {
+            for (s in BUILDING_SYMBOLS) if (!used.contains(s)) return NextSymbol(s, "")
+            return NextSymbol(BUILDING_SYMBOLS.last(), "1")
+        }
+        for (s in symbolsForCategory(category)) if (!used.contains(s)) return NextSymbol(s, "")
+        return NextSymbol(symbolsForCategory(category).last(), "")
+    }
+
+    fun symbolsForCategory(category: String): Array<String> = when (category) {
+        CATEGORY_LAND -> LAND_SYMBOLS
+        CATEGORY_BUILDING -> BUILDING_SYMBOLS
+        else -> EXTRA_SYMBOLS
+    }
+
+    // ---- Mode / display helpers ----
+
+    fun isFieldSurveyMode(): Boolean = appMode == MODE_FIELD_SURVEY
+
+    fun modeLabel(): String = if (isFieldSurveyMode()) "현지답사" else "자체감정"
+
+    fun modeDefaultTitle(): String = "${modeLabel()} 사진"
+
+    fun documentHeaderText(): String {
+        return if (propertyAddress.trim().isEmpty()) modeDefaultTitle() else propertyAddress.trim()
+    }
+
+    fun categoryLabel(category: String): String = when (category) {
+        CATEGORY_LAND -> "토지"
+        CATEGORY_BUILDING -> "건물"
+        CATEGORY_CUSTOM -> "기타"
+        CATEGORY_FIELD -> "현지답사"
+        else -> "제시외건물"
+    }
+
+    private fun formatDate(time: Long): String =
+        SimpleDateFormat("yyyy.MM.dd HH:mm", Locale.KOREA).format(Date(time))
+
+    fun displayPhotoStamp(photo: PhotoItem): String = "촬영: ${formatDate(photo.createdAt)}"
+
+    fun photoMetaText(photo: PhotoItem): String {
+        val details = fieldPhotoDetails(photo)
+        if (photo.memo.isEmpty()) return if (details.isEmpty()) formatDate(photo.createdAt) else details
+        return if (details.isEmpty()) photo.memo else "${photo.memo} / $details"
+    }
+
+    fun photoCaption(photo: PhotoItem): String {
+        if (photo.category == CATEGORY_FIELD) {
+            val details = fieldPhotoDetails(photo)
+            if (photo.memo.isNotEmpty() && details.isNotEmpty()) return "${photo.memo} / $details"
+            if (photo.memo.isNotEmpty()) return photo.memo
+            if (details.isNotEmpty()) return details
+        }
+        if (photo.memo.isNotEmpty()) return photo.memo
+        return photoTitle(photo)
+    }
+
+    fun photoTitle(photo: PhotoItem): String {
+        if (photo.category == CATEGORY_FIELD) return "현지답사 사진 ${photo.symbol}"
+        if (photo.category == CATEGORY_CUSTOM) return "기타사항: ${photo.symbol}"
+        return "${categoryLabel(photo.category)} 기호 ${photo.symbol}"
+    }
+
+    fun fieldPhotoDetails(photo: PhotoItem): String {
+        if (photo.category != CATEGORY_FIELD) return ""
+        val parts = mutableListOf<String>()
+        if (photo.debtorName.isNotBlank()) parts.add("채무자: ${photo.debtorName.trim()}")
+        if (photo.fieldSurveyor.isNotBlank()) parts.add("답사자: ${photo.fieldSurveyor.trim()}")
+        return parts.joinToString(" / ")
+    }
+
+    // ---- Dialogs (Java-style AlertDialog; D3 에서 Compose 화 예정) ----
+
+    fun showModeDialog() {
+        val labels = arrayOf("자체감정", "현지답사")
+        val values = arrayOf(MODE_SELF_APPRAISAL, MODE_FIELD_SURVEY)
+        val checked = if (isFieldSurveyMode()) 1 else 0
+        AlertDialog.Builder(this)
+            .setTitle("작업 모드")
+            .setSingleChoiceItems(labels, checked) { dialog, which ->
+                appMode = values[which]
+                saveAppMode()
+                Toast.makeText(this, "${labels[which]} 모드로 변경했습니다.", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    fun showAddressDialog() {
+        val input = EditText(this).apply {
+            setSingleLine(true)
+            hint = "물건지 주소"
+            setText(propertyAddress)
+            textSize = 14f
+        }
+        AlertDialog.Builder(this)
+            .setTitle("물건지 주소")
+            .setView(input)
+            .setNegativeButton("취소", null)
+            .setPositiveButton("저장") { _, _ ->
+                propertyAddress = input.text.toString().trim()
+                savePropertyAddress()
+                Toast.makeText(this, "물건지 주소가 저장되었습니다.", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    fun showEmailDialog() {
+        if (photos.isEmpty()) {
+            Toast.makeText(this, "공유할 사진이 없습니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val shareMode = getSavedMailApp()
+        val savedRecipient = getSavedEmailRecipient()
+        if (shareMode == MAIL_APP_OTHER || savedRecipient.isNotEmpty()) {
+            showShareFormatDialog(savedRecipient)
+            return
+        }
+        showEmailAddressDialog()
+    }
+
+    private fun showEmailAddressDialog() {
+        val input = EditText(this).apply {
+            setSingleLine(true)
+            hint = "기본 수신 메일주소"
+            setText(getSavedEmailRecipient())
+            textSize = 14f
+        }
+        AlertDialog.Builder(this)
+            .setTitle("기본 메일주소")
+            .setView(input)
+            .setNegativeButton("취소", null)
+            .setPositiveButton("저장") { _, _ ->
+                val recipient = input.text.toString().trim()
+                if (!recipient.contains("@")) {
+                    Toast.makeText(this, "메일주소를 확인해주세요.", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                saveEmailRecipient(recipient)
+                Toast.makeText(this, "기본 메일주소가 저장되었습니다.", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    fun showGuideSettingsDialog() {
+        // 단순화된 설정 다이얼로그 (Phase D3 에서 Compose 로 재작성).
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpPx(20), dpPx(16), dpPx(20), dpPx(8))
+        }
+
+        fun label(text: String): TextView = TextView(this).apply {
+            this.text = text
+            textSize = 14f
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dpPx(12), 0, dpPx(4))
+        }
+
+        content.addView(label("기본 메일주소"))
+        val emailValue = TextView(this).apply {
+            val saved = getSavedEmailRecipient()
+            text = if (saved.isEmpty()) "미설정 (탭하여 설정)" else saved
+            textSize = 13f
+            setOnClickListener { showEmailAddressDialog() }
+        }
+        content.addView(emailValue)
+
+        content.addView(label("기본 공유 방식 (현재: ${mailAppLabel(getSavedMailApp())})"))
+        val mailAppValue = TextView(this).apply {
+            text = "탭하여 변경"
+            textSize = 13f
+            setOnClickListener { showMailAppDialog() }
+        }
+        content.addView(mailAppValue)
+
+        val alphaLabel = label("배경 불투명도 ${guideAlphaPercent}%")
+        content.addView(alphaLabel)
+        val alphaSeek = SeekBar(this).apply {
+            max = 65
+            progress = guideAlphaPercent - 35
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    guideAlphaPercent = 35 + progress
+                    alphaLabel.text = "배경 불투명도 ${guideAlphaPercent}%"
+                    saveGuideSettings()
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        content.addView(alphaSeek)
+
+        val scaleLabel = label("가이드 크기 ${guideScalePercent}%")
+        content.addView(scaleLabel)
+        val scaleSeek = SeekBar(this).apply {
+            max = 40
+            progress = guideScalePercent - 60
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    guideScalePercent = 60 + progress
+                    scaleLabel.text = "가이드 크기 ${guideScalePercent}%"
+                    saveGuideSettings()
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        content.addView(scaleSeek)
+
+        AlertDialog.Builder(this)
+            .setTitle("설정")
+            .setView(content)
+            .setNegativeButton("기본값") { _, _ ->
+                guideAlphaPercent = 82
+                guideScalePercent = 78
+                saveGuideSettings()
+            }
+            .setPositiveButton("닫기", null)
+            .show()
+    }
+
+    fun showHelpDialog() {
+        val help = """
+            • 자체감정/현지답사: 작업 모드 전환
+            • 물건지: 사진자료 상단 주소
+            • 채무자/답사자: 현지답사 모드 입력
+            • 저장: PPTX/PDF/JPG 로 사진자료 저장
+            • 공유: PPTX/PDF/JPG 로 메일/공유
+            • 목록: 등록된 사진 보기 / 삭제
+            • 전체삭제: 사진 + 파일 모두 제거
+            • 설정: 메일주소 / 공유앱 / 가이드 투명도/크기
+            • 토지/건물/제시외/기타: 사진 분류
+            • 기호: 분류별 자동 다음 기호
+            • 사진 설명: 비워두면 분류+기호 자동 사용
+            • 촬영: 카메라로 촬영 후 자동 저장
+            • 이미지 선택: 갤러리에서 추가
+        """.trimIndent()
+        AlertDialog.Builder(this)
+            .setTitle("도움말")
+            .setMessage(help)
+            .setPositiveButton("닫기", null)
+            .show()
+    }
+
+    private fun showMailAppDialog() {
+        val labels = arrayOf("Gmail", "Other")
+        val values = arrayOf(MAIL_APP_GMAIL, MAIL_APP_OTHER)
+        val checked = indexOfOrDefault(values, getSavedMailApp(), 0)
+        AlertDialog.Builder(this)
+            .setTitle("기본 공유 방식")
+            .setSingleChoiceItems(labels, checked) { dialog, which ->
+                saveMailApp(values[which])
+                Toast.makeText(this, "${labels[which]}로 설정했습니다.", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    fun showPhotoListDialog() {
+        if (photos.isEmpty()) {
+            Toast.makeText(this, "등록된 사진이 없습니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val sorted = sortedPhotos()
+        val labels = sorted.map { "${photoTitle(it)} · ${photoMetaText(it)}" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("등록된 사진 ${sorted.size}장")
+            .setItems(labels) { _, which ->
+                val item = sorted[which]
+                AlertDialog.Builder(this)
+                    .setTitle(photoTitle(item))
+                    .setMessage("이 사진을 삭제할까요?")
+                    .setPositiveButton("삭제") { _, _ -> deletePhoto(item) }
+                    .setNegativeButton("취소", null)
+                    .show()
+            }
+            .setPositiveButton("닫기", null)
+            .show()
+    }
+
+    fun showExportFormatDialog() {
+        if (photos.isEmpty()) {
+            Toast.makeText(this, "저장할 사진이 없습니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val labels = arrayOf("PPTX", "PDF", "JPG")
+        val formats = arrayOf(FORMAT_PPTX, FORMAT_PDF, FORMAT_JPG)
+        AlertDialog.Builder(this)
+            .setTitle("저장 형식 선택")
+            .setItems(labels) { _, which -> exportOutput(formats[which]) }
+            .show()
+    }
+
+    private fun showShareFormatDialog(recipient: String) {
+        val labels = arrayOf("PPTX", "PDF", "JPG")
+        val formats = arrayOf(FORMAT_PPTX, FORMAT_PDF, FORMAT_JPG)
+        AlertDialog.Builder(this)
+            .setTitle("공유 형식 선택")
+            .setItems(labels) { _, which -> shareOutput(recipient, formats[which]) }
+            .show()
+    }
+
+    // ---- Export (background) ----
+
+    private fun exportOutput(format: String) {
+        if (exportInProgress) {
+            Toast.makeText(this, "이미 사진자료를 만드는 중입니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(this, "${formatLabel(format)} 사진자료를 만드는 중입니다…", Toast.LENGTH_SHORT).show()
+        exportInProgress = true
+
+        exportExecutor.submit {
+            try {
+                if (format == FORMAT_JPG) {
+                    val jpgFiles = createJpgFiles()
+                    writePublicFiles(jpgFiles)
+                    runOnUiSafely {
+                        exportInProgress = false
+                        Toast.makeText(this, "JPG 사진자료를 저장했습니다.", Toast.LENGTH_LONG).show()
+                    }
+                    return@submit
+                }
+                val bytes = createOutputBytes(format)
+                runOnUiSafely {
+                    exportInProgress = false
+                    pendingExportBytes = bytes
+                    pendingExportLabel = formatLabel(format)
+                    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = mimeForFormat(format)
+                        putExtra(Intent.EXTRA_TITLE, outputFileName(format))
+                    }
+                    createOutputLauncher.launch(intent)
+                }
+            } catch (_: Exception) {
+                runOnUiSafely {
+                    exportInProgress = false
+                    Toast.makeText(this, "${formatLabel(format)} 파일을 만들 수 없습니다.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun runOnUiSafely(block: () -> Unit) {
+        mainHandler.post {
+            if (isFinishing || isDestroyed) return@post
+            block()
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun createOutputBytes(format: String): ByteArray =
+        if (format == FORMAT_PDF) createPdfBytes() else createPptxBytes()
+
+    @Throws(IOException::class)
+    private fun createPptxBytes(): ByteArray {
+        val exportPhotos = ArrayList<PptxExporter.PhotoData>()
+        for (photo in sortedPhotos()) {
+            exportPhotos.add(PptxExporter.PhotoData(Uri.parse(photo.uri), photoCaption(photo), displayPhotoStamp(photo)))
+        }
+        return PptxExporter.create(this, exportPhotos, documentHeaderText())
+    }
+
+    @Throws(IOException::class)
+    private fun createPdfBytes(): ByteArray {
+        val sorted = sortedPhotos()
+        val document = PdfDocument()
+        val pageWidth = 595
+        val pageHeight = 842
+        try {
+            var i = 0
+            while (i < sorted.size) {
+                val info = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, (i / 2) + 1).create()
+                val page = document.startPage(info)
+                drawOutputPage(page.canvas, pageWidth, pageHeight, sorted, i, (i / 2) + 1)
+                document.finishPage(page)
+                i += 2
+            }
+            val output = ByteArrayOutputStream()
+            document.writeTo(output)
+            return output.toByteArray()
+        } finally {
+            document.close()
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun createJpgFiles(): ArrayList<ExportFile> {
+        val sorted = sortedPhotos()
+        val files = ArrayList<ExportFile>()
+        val pageWidth = 1240
+        val pageHeight = 1754
+        var i = 0
+        while (i < sorted.size) {
+            val bitmap = Bitmap.createBitmap(pageWidth, pageHeight, Bitmap.Config.ARGB_8888)
+            try {
+                val canvas = Canvas(bitmap)
+                drawOutputPage(canvas, pageWidth, pageHeight, sorted, i, (i / 2) + 1)
+                val output = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output)
+                files.add(ExportFile(pageJpgFileName((i / 2) + 1), JPG_MIME, output.toByteArray()))
+            } finally {
+                bitmap.recycle()
+            }
+            i += 2
+        }
+        return files
+    }
+
+    @Throws(IOException::class)
+    private fun drawOutputPage(canvas: Canvas, pageWidth: Int, pageHeight: Int, sorted: List<PhotoItem>, startIndex: Int, pageNumber: Int) {
+        val sx = pageWidth / 595f
+        val sy = pageHeight / 842f
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
+        canvas.drawColor(Color.WHITE)
+        paint.color = Color.rgb(20, 20, 20)
+        paint.typeface = Typeface.DEFAULT
+        paint.textAlign = Paint.Align.LEFT
+        paint.textSize = 12f * sx
+        canvas.drawText(documentHeaderText(), 44f * sx, 34f * sy, paint)
+
+        paint.textAlign = Paint.Align.CENTER
+        paint.typeface = Typeface.DEFAULT_BOLD
+        paint.textSize = 22f * sx
+        canvas.drawText("사 진 용 지", pageWidth / 2f, 72f * sy, paint)
+
+        paint.textAlign = Paint.Align.RIGHT
+        paint.typeface = Typeface.DEFAULT
+        paint.textSize = 10f * sx
+        canvas.drawText("Page : $pageNumber", 530f * sx, 105f * sy, paint)
+
+        drawOutputPhoto(canvas, sorted[startIndex], RectF(70f * sx, 120f * sy, 525f * sx, 335f * sy), 348f * sy, sx)
+        if (startIndex + 1 < sorted.size) {
+            drawOutputPhoto(canvas, sorted[startIndex + 1], RectF(70f * sx, 430f * sy, 525f * sx, 645f * sy), 658f * sy, sx)
+        }
+
+        paint.color = Color.rgb(20, 20, 20)
+        paint.textAlign = Paint.Align.RIGHT
+        paint.typeface = Typeface.DEFAULT
+        paint.textSize = 10f * sx
+        canvas.drawText("Page : $pageNumber", 530f * sx, 815f * sy, paint)
+    }
+
+    @Throws(IOException::class)
+    private fun drawOutputPhoto(canvas: Canvas, photo: PhotoItem, frame: RectF, captionBaseline: Float, scale: Float) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+        paint.style = Paint.Style.FILL
+        paint.color = Color.rgb(245, 245, 245)
+        canvas.drawRect(frame, paint)
+
+        var bitmap: Bitmap? = null
+        var oriented: Bitmap? = null
+        try {
+            val uri = Uri.parse(photo.uri)
+            bitmap = decodeBitmap(uri, 2200)
+            if (bitmap != null) {
+                oriented = rotateBitmap(bitmap, readExifOrientation(uri))
+                drawBitmapCenterCrop(canvas, oriented, frame, paint)
+            }
+        } finally {
+            if (oriented != null && oriented !== bitmap) oriented.recycle()
+            bitmap?.recycle()
+        }
+
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = maxOf(1f, scale)
+        paint.color = Color.rgb(35, 35, 35)
+        canvas.drawRect(frame, paint)
+
+        drawOutputStamp(canvas, displayPhotoStamp(photo), frame, scale)
+
+        paint.style = Paint.Style.FILL
+        paint.color = Color.rgb(20, 20, 20)
+        paint.textAlign = Paint.Align.CENTER
+        paint.typeface = Typeface.DEFAULT
+        paint.textSize = 12f * scale
+        canvas.drawText(photoCaption(photo), frame.centerX(), captionBaseline, paint)
+    }
+
+    private fun drawBitmapCenterCrop(canvas: Canvas, bitmap: Bitmap, dst: RectF, paint: Paint) {
+        val s = maxOf(dst.width() / bitmap.width, dst.height() / bitmap.height)
+        val srcW = dst.width() / s
+        val srcH = dst.height() / s
+        val left = (bitmap.width - srcW) / 2f
+        val top = (bitmap.height - srcH) / 2f
+        val src = Rect(
+            maxOf(0, left.roundToIntSafe()),
+            maxOf(0, top.roundToIntSafe()),
+            minOf(bitmap.width, (left + srcW).roundToIntSafe()),
+            minOf(bitmap.height, (top + srcH).roundToIntSafe())
+        )
+        canvas.drawBitmap(bitmap, src, dst, paint)
+    }
+
+    private fun Float.roundToIntSafe(): Int = Math.round(this)
+
+    private fun drawOutputStamp(canvas: Canvas, text: String, frame: RectF, scale: Float) {
+        if (text.isEmpty()) return
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
+        textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textPaint.textSize = 9f * scale
+        textPaint.color = Color.WHITE
+        val bounds = Rect()
+        textPaint.getTextBounds(text, 0, text.length, bounds)
+        val padX = 5f * scale
+        val padY = 4f * scale
+        val boxW = bounds.width() + padX * 2f
+        val boxH = bounds.height() + padY * 2f
+        val left = frame.right - boxW - 8f * scale
+        val top = frame.bottom - boxH - 8f * scale
+        val bg = Paint(Paint.ANTI_ALIAS_FLAG)
+        bg.style = Paint.Style.FILL
+        bg.color = Color.argb(175, 0, 0, 0)
+        canvas.drawRect(left, top, left + boxW, top + boxH, bg)
+        canvas.drawText(text, left + padX, top + padY + bounds.height(), textPaint)
+    }
+
+    private fun outputFileName(format: String): String {
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.KOREA).format(Date())
+        return "${modeLabel()}_사진자료_$stamp.${extensionForFormat(format)}"
+    }
+
+    private fun pageJpgFileName(pageNumber: Int): String {
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.KOREA).format(Date())
+        return "${modeLabel()}_사진자료_${stamp}_p$pageNumber.jpg"
+    }
+
+    private fun extensionForFormat(format: String): String = when (format) {
+        FORMAT_PDF -> "pdf"
+        FORMAT_JPG -> "jpg"
+        else -> "pptx"
+    }
+
+    private fun mimeForFormat(format: String): String = when (format) {
+        FORMAT_PDF -> PDF_MIME
+        FORMAT_JPG -> JPG_MIME
+        else -> PPTX_MIME
+    }
+
+    private fun formatLabel(format: String): String = when (format) {
+        FORMAT_PDF -> "PDF"
+        FORMAT_JPG -> "JPG"
+        else -> "PPTX"
+    }
+
+    // ---- Share ----
+
+    private fun shareOutput(recipient: String, format: String) {
+        if (exportInProgress) {
+            Toast.makeText(this, "이미 사진자료를 만드는 중입니다.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(this, "${formatLabel(format)} 사진자료를 만드는 중입니다…", Toast.LENGTH_SHORT).show()
+        exportInProgress = true
+
+        val mailApp = getSavedMailApp()
+        val otherShare = mailApp == MAIL_APP_OTHER
+
+        exportExecutor.submit {
+            val attachmentUris: ArrayList<Uri>
+            try {
+                attachmentUris = if (format == FORMAT_JPG) {
+                    val jpgFiles = createJpgFiles()
+                    if (otherShare) writePublicFiles(jpgFiles) else writeCachedFiles(jpgFiles)
+                } else {
+                    val file = ExportFile(outputFileName(format), mimeForFormat(format), createOutputBytes(format))
+                    val files = arrayListOf(file)
+                    if (otherShare) writePublicFiles(files) else writeCachedFiles(files)
+                }
+            } catch (_: Exception) {
+                runOnUiSafely {
+                    exportInProgress = false
+                    Toast.makeText(this, "공유 화면을 열 수 없습니다.", Toast.LENGTH_LONG).show()
+                }
+                return@submit
+            }
+            runOnUiSafely {
+                exportInProgress = false
+                launchShareIntent(recipient, format, otherShare, attachmentUris)
+            }
+        }
+    }
+
+    private fun launchShareIntent(recipient: String, format: String, otherShare: Boolean, attachmentUris: ArrayList<Uri>) {
+        try {
+            val emailIntent = if (otherShare) createShareIntent(attachmentUris, format)
+            else createEmailIntent(recipient, attachmentUris, format)
+            val mailPackage = selectedMailPackage()
+            if (mailPackage.isNotEmpty()) {
+                emailIntent.setPackage(mailPackage)
+                for (uri in attachmentUris) {
+                    grantUriPermission(mailPackage, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(emailIntent)
+            } else {
+                grantUriPermissionsToMatchingApps(emailIntent, attachmentUris)
+                startActivity(Intent.createChooser(emailIntent, "공유 앱 선택"))
+            }
+        } catch (_: ActivityNotFoundException) {
+            openEmailChooserFallback(recipient, attachmentUris, format)
+        } catch (_: Exception) {
+            Toast.makeText(this, "공유 화면을 열 수 없습니다.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun writeCachedFiles(files: ArrayList<ExportFile>): ArrayList<Uri> {
+        val exportDir = File(cacheDir, "mail_exports")
+        if (!exportDir.exists() && !exportDir.mkdirs()) {
+            throw IOException("Cannot create mail export directory")
+        }
+        exportDir.listFiles()?.forEach { it.delete() }
+
+        val uris = ArrayList<Uri>()
+        for (file in files) {
+            val exportFile = File(exportDir, file.name)
+            FileOutputStream(exportFile).use { it.write(file.bytes) }
+            uris.add(FileProvider.getUriForFile(this, "$packageName.fileprovider", exportFile))
+        }
+        return uris
+    }
+
+    @Throws(IOException::class)
+    private fun writePublicFiles(files: ArrayList<ExportFile>): ArrayList<Uri> {
+        val uris = ArrayList<Uri>()
+        for (file in files) uris.add(writePublicFile(file))
+        return uris
+    }
+
+    @Throws(IOException::class)
+    private fun writePublicFile(file: ExportFile): Uri {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
+                put(MediaStore.MediaColumns.MIME_TYPE, file.mimeType)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/AppraisalCamera")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: throw IOException("Cannot create shared file")
+            contentResolver.openOutputStream(uri)?.use { it.write(file.bytes) }
+                ?: throw IOException("No output stream")
+            val readyValues = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+            contentResolver.update(uri, readyValues, null, null)
+            return uri
+        }
+        return writeCachedFiles(arrayListOf(file))[0]
+    }
+
+    private fun createEmailIntent(recipient: String, uris: ArrayList<Uri>, format: String): Intent {
+        val intent = Intent(if (uris.size > 1) Intent.ACTION_SEND_MULTIPLE else Intent.ACTION_SEND)
+        intent.type = mimeForFormat(format)
+        if (recipient.isNotBlank()) intent.putExtra(Intent.EXTRA_EMAIL, arrayOf(recipient.trim()))
+        intent.putExtra(Intent.EXTRA_SUBJECT, "${documentHeaderText()} 사진자료")
+        intent.putExtra(Intent.EXTRA_TEXT, "사진자료 ${formatLabel(format)} 파일을 첨부합니다.")
+        putStreams(intent, uris)
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return intent
+    }
+
+    private fun createShareIntent(uris: ArrayList<Uri>, format: String): Intent {
+        val intent = Intent(if (uris.size > 1) Intent.ACTION_SEND_MULTIPLE else Intent.ACTION_SEND)
+        intent.type = mimeForFormat(format)
+        intent.putExtra(Intent.EXTRA_TITLE, "${documentHeaderText()} 사진자료")
+        putStreams(intent, uris)
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return intent
+    }
+
+    private fun putStreams(intent: Intent, uris: ArrayList<Uri>) {
+        if (uris.size == 1) intent.putExtra(Intent.EXTRA_STREAM, uris[0])
+        else intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+        var clipData: ClipData? = null
+        for (uri in uris) {
+            if (clipData == null) clipData = ClipData.newUri(contentResolver, "사진자료", uri)
+            else clipData.addItem(ClipData.Item(uri))
+        }
+        if (clipData != null) intent.clipData = clipData
+    }
+
+    private fun grantUriPermissionsToMatchingApps(intent: Intent, uris: ArrayList<Uri>) {
+        for (info in packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)) {
+            val pkg = info.activityInfo?.packageName ?: continue
+            for (uri in uris) grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+
+    private fun openEmailChooserFallback(recipient: String, uris: ArrayList<Uri>, format: String) {
+        if (uris.isEmpty()) {
+            Toast.makeText(this, "공유 화면을 열 수 없습니다.", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            val fallback = createShareIntent(uris, format)
+            grantUriPermissionsToMatchingApps(fallback, uris)
+            startActivity(Intent.createChooser(fallback, "공유 앱 선택"))
+        } catch (_: Exception) {
+            Toast.makeText(this, "공유 화면을 열 수 없습니다.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun writePendingExport(uri: Uri) {
+        val bytes = pendingExportBytes ?: return
+        try {
+            contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                ?: throw IOException("No output stream")
+            Toast.makeText(this, "$pendingExportLabel 사진자료를 저장했습니다.", Toast.LENGTH_LONG).show()
+        } catch (_: IOException) {
+            Toast.makeText(this, "사진자료 저장에 실패했습니다.", Toast.LENGTH_LONG).show()
+        } finally {
+            pendingExportBytes = null
+            pendingExportLabel = ""
+        }
+    }
+
+    // ---- SharedPreferences ----
+
+    private fun prefs(): SharedPreferences = getSharedPreferences(PREFS, MODE_PRIVATE)
+
+    private fun loadPhotos() {
+        photos.clear()
+        val saved = prefs().getString(PREF_PHOTOS, "[]") ?: "[]"
+        try {
+            val array = JSONArray(saved)
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val savedId = obj.optString("id")
+                val item = PhotoItem(
+                    id = if (savedId.isEmpty()) UUID.randomUUID().toString() else savedId,
+                    category = obj.optString("category", CATEGORY_LAND),
+                    symbol = obj.optString("symbol", "1"),
+                    memo = obj.optString("memo"),
+                    uri = obj.optString("uri"),
+                    createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                    stamped = obj.optBoolean("stamped", true),
+                    debtorName = obj.optString("debtorName"),
+                    fieldSurveyor = obj.optString("fieldSurveyor")
+                )
+                if (item.uri.isNotEmpty()) photos.add(item)
+            }
+        } catch (_: JSONException) {
+            photos.clear()
+        }
+    }
+
+    private fun savePhotos() {
+        val array = JSONArray()
+        for (item in photos) {
+            try {
+                val obj = JSONObject()
+                obj.put("id", item.id)
+                obj.put("category", item.category)
+                obj.put("symbol", item.symbol)
+                obj.put("memo", item.memo)
+                obj.put("uri", item.uri)
+                obj.put("createdAt", item.createdAt)
+                obj.put("stamped", item.stamped)
+                obj.put("debtorName", item.debtorName)
+                obj.put("fieldSurveyor", item.fieldSurveyor)
+                array.put(obj)
+            } catch (_: JSONException) {
+            }
+        }
+        prefs().edit().putString(PREF_PHOTOS, array.toString()).apply()
+    }
+
+    private fun loadPropertyAddress() {
+        propertyAddress = prefs().getString(PREF_ADDRESS, "") ?: ""
+    }
+
+    private fun savePropertyAddress() {
+        prefs().edit().putString(PREF_ADDRESS, propertyAddress).apply()
+    }
+
+    private fun loadAppMode() {
+        val savedMode = prefs().getString(PREF_APP_MODE, MODE_SELF_APPRAISAL) ?: MODE_SELF_APPRAISAL
+        appMode = if (savedMode == MODE_FIELD_SURVEY) MODE_FIELD_SURVEY else MODE_SELF_APPRAISAL
+    }
+
+    fun saveAppMode() {
+        prefs().edit().putString(PREF_APP_MODE, appMode).apply()
+    }
+
+    private fun loadFieldSurveyInfo() {
+        val p = prefs()
+        debtorName = p.getString(PREF_DEBTOR_NAME, "") ?: ""
+        fieldSurveyor = p.getString(PREF_FIELD_SURVEYOR, "") ?: ""
+    }
+
+    fun saveFieldSurveyInfo() {
+        prefs().edit()
+            .putString(PREF_DEBTOR_NAME, debtorName)
+            .putString(PREF_FIELD_SURVEYOR, fieldSurveyor)
+            .apply()
+    }
+
+    private fun loadGuideSettings() {
+        val p = prefs()
+        guideAlphaPercent = clamp(p.getInt(PREF_GUIDE_ALPHA, 82), 35, 100)
+        guideScalePercent = clamp(p.getInt(PREF_GUIDE_SCALE, 78), 60, 100)
+    }
+
+    private fun saveGuideSettings() {
+        prefs().edit()
+            .putInt(PREF_GUIDE_ALPHA, guideAlphaPercent)
+            .putInt(PREF_GUIDE_SCALE, guideScalePercent)
+            .apply()
+    }
+
+    private fun restoreControlState(savedInstanceState: Bundle?) {
+        if (savedInstanceState != null) {
+            currentCategory = normalizeCategory(savedInstanceState.getString(STATE_CURRENT_CATEGORY, CATEGORY_LAND))
+            currentSymbol = savedInstanceState.getString(STATE_CURRENT_SYMBOL, "") ?: ""
+            currentBuildingSub = savedInstanceState.getString(STATE_CURRENT_BUILDING_SUB, "") ?: ""
+            currentMemo = savedInstanceState.getString(STATE_CURRENT_MEMO, "") ?: ""
+            return
+        }
+        val p = prefs()
+        currentCategory = normalizeCategory(p.getString(PREF_CURRENT_CATEGORY, CATEGORY_LAND))
+        currentSymbol = p.getString(PREF_CURRENT_SYMBOL, "") ?: ""
+        currentBuildingSub = p.getString(PREF_CURRENT_BUILDING_SUB, "") ?: ""
+        currentMemo = p.getString(PREF_CURRENT_MEMO, "") ?: ""
+    }
+
+    fun saveControlState() {
+        prefs().edit()
+            .putString(PREF_CURRENT_CATEGORY, currentCategory)
+            .putString(PREF_CURRENT_SYMBOL, currentSymbol)
+            .putString(PREF_CURRENT_BUILDING_SUB, currentBuildingSub)
+            .putString(PREF_CURRENT_MEMO, currentMemo)
+            .apply()
+    }
+
+    private fun normalizeCategory(category: String?): String {
+        if (category == CATEGORY_FIELD) return CATEGORY_LAND
+        for (v in CATEGORY_ORDER) if (v == category) return v
+        return CATEGORY_LAND
+    }
+
+    private fun getSavedEmailRecipient(): String =
+        (prefs().getString(PREF_EMAIL, "") ?: "").trim()
+
+    private fun saveEmailRecipient(recipient: String) {
+        prefs().edit().putString(PREF_EMAIL, recipient.trim()).apply()
+    }
+
+    private fun getSavedMailApp(): String {
+        val v = prefs().getString(PREF_MAIL_APP, MAIL_APP_OTHER) ?: MAIL_APP_OTHER
+        if (v == "chooser" || v == "naver") return MAIL_APP_OTHER
+        return v
+    }
+
+    private fun saveMailApp(mailApp: String) {
+        prefs().edit().putString(PREF_MAIL_APP, mailApp).apply()
+    }
+
+    private fun selectedMailPackage(): String =
+        if (getSavedMailApp() == MAIL_APP_GMAIL) GMAIL_PACKAGE else ""
+
+    private fun mailAppLabel(mailApp: String): String =
+        if (mailApp == MAIL_APP_GMAIL) "Gmail" else "Other"
+
+    // ---- helpers ----
+
+    private fun dpPx(value: Int): Int =
+        Math.round(value * resources.displayMetrics.density)
+
+    private fun clamp(v: Int, min: Int, max: Int): Int = maxOf(min, minOf(max, v))
+
+    private fun indexOf(values: Array<String>, target: String): Int {
+        for (i in values.indices) if (values[i] == target) return i
+        return -1
+    }
+
+    private fun indexOfOrDefault(values: Array<String>, target: String, fallback: Int): Int {
+        for (i in values.indices) if (values[i] == target) return i
+        return fallback
+    }
+
+    // ---- Data classes ----
+
+    data class PhotoItem(
+        val id: String,
+        val category: String,
+        val symbol: String,
+        val memo: String,
+        val uri: String,
+        val createdAt: Long,
+        val stamped: Boolean,
+        val debtorName: String,
+        val fieldSurveyor: String
+    )
+
+    data class ExportFile(val name: String, val mimeType: String, val bytes: ByteArray)
+
+    data class NextSymbol(val base: String, val sub: String)
+
+    companion object {
+        const val PREFS = "appraisal_photos"
+        const val PREF_PHOTOS = "photos"
+        const val PREF_ADDRESS = "property_address"
+        const val PREF_APP_MODE = "app_mode"
+        const val PREF_DEBTOR_NAME = "debtor_name"
+        const val PREF_FIELD_SURVEYOR = "field_surveyor"
+        const val PREF_EMAIL = "email_recipient"
+        const val PREF_MAIL_APP = "mail_app"
+        const val PREF_CURRENT_CATEGORY = "current_category"
+        const val PREF_CURRENT_SYMBOL = "current_symbol"
+        const val PREF_CURRENT_BUILDING_SUB = "current_building_sub"
+        const val PREF_CURRENT_MEMO = "current_memo"
+        const val PREF_GUIDE_ALPHA = "guide_alpha_percent"
+        const val PREF_GUIDE_SCALE = "guide_scale_percent"
+        const val STATE_CURRENT_CATEGORY = "state_current_category"
+        const val STATE_CURRENT_SYMBOL = "state_current_symbol"
+        const val STATE_CURRENT_BUILDING_SUB = "state_current_building_sub"
+        const val STATE_CURRENT_MEMO = "state_current_memo"
+        const val MAIL_APP_OTHER = "other"
+        const val MAIL_APP_GMAIL = "gmail"
+        const val GMAIL_PACKAGE = "com.google.android.gm"
+        const val PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        const val PDF_MIME = "application/pdf"
+        const val JPG_MIME = "image/jpeg"
+        const val FORMAT_PPTX = "pptx"
+        const val FORMAT_PDF = "pdf"
+        const val FORMAT_JPG = "jpg"
+        const val MODE_SELF_APPRAISAL = "self_appraisal"
+        const val MODE_FIELD_SURVEY = "field_survey"
+
+        const val CATEGORY_LAND = "land"
+        const val CATEGORY_BUILDING = "building"
+        const val CATEGORY_EXTRA = "extra"
+        const val CATEGORY_CUSTOM = "custom"
+        const val CATEGORY_FIELD = "field"
+        val CATEGORY_ORDER = arrayOf(CATEGORY_LAND, CATEGORY_BUILDING, CATEGORY_EXTRA, CATEGORY_CUSTOM, CATEGORY_FIELD)
+        val LAND_SYMBOLS = Array(99) { (it + 1).toString() }
+        val BUILDING_SYMBOLS = arrayOf("가","나","다","라","마","바","사","아","자","차","카","타","파","하")
+        val EXTRA_SYMBOLS = arrayOf("ㄱ","ㄴ","ㄷ","ㄹ","ㅁ","ㅂ","ㅅ","ㅇ","ㅈ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ")
+        val BUILDING_SUB_SYMBOLS = arrayOf("없음","-1","-2","-3","-4","-5","-6","-7","-8","-9")
+    }
+}
