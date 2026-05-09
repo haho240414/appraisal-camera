@@ -1,15 +1,18 @@
 package com.codex.appraisalcamera.ui
 
+import android.content.res.Configuration
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,7 +21,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -82,6 +91,11 @@ import com.codex.appraisalcamera.MainActivity
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CameraScreen(activity: MainActivity) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // 사용자가 설정에서 조정한 가이드 투명도/크기 — 카드를 카메라 화면 위에 어떻게 얹을지 결정.
+    val cardAlpha = (activity.guideAlphaPercent / 100f).coerceIn(0.35f, 1f)
+    val cardScale = (activity.guideScalePercent / 100f).coerceIn(0.6f, 1f)
+
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
 
         // 카메라 미리보기 — 1회만 생성, 활성화는 Activity 가 책임.
@@ -95,19 +109,75 @@ fun CameraScreen(activity: MainActivity) {
             }
         )
 
-        // 상단 바 + 하단 컨트롤 카드를 Column 으로 배치.
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.systemBars)
-        ) {
-            TopBar(activity = activity)
-            Spacer(Modifier.weight(1f))
-            ControlsCard(activity = activity)
+        if (isLandscape) {
+            LandscapeOverlay(activity, cardAlpha, cardScale)
+        } else {
+            PortraitOverlay(activity, cardAlpha, cardScale)
         }
 
         // 시트/다이얼로그 디스패처
         AppSheets(activity = activity)
+    }
+}
+
+/**
+ * 세로 모드: 상단 바 + 하단 컨트롤 카드 (카드는 사용자 설정대로 scale/alpha 적용).
+ * 카드의 transformOrigin 을 bottom-center 로 둬서, scale 을 줄여도 화면 아래쪽에 붙어 있게 한다.
+ */
+@Composable
+private fun PortraitOverlay(activity: MainActivity, cardAlpha: Float, cardScale: Float) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.systemBars)
+    ) {
+        TopBar(activity = activity)
+        Spacer(Modifier.weight(1f))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    scaleX = cardScale
+                    scaleY = cardScale
+                    transformOrigin = TransformOrigin(0.5f, 1f)
+                }
+        ) {
+            ControlsCard(activity = activity, cardAlpha = cardAlpha)
+        }
+    }
+}
+
+/**
+ * 가로 모드: 상단 바 + 우측 사이드패널.
+ * 카메라 화면이 가려지지 않도록 컨트롤 카드를 오른쪽 320dp 폭에 한정.
+ * 카드 높이가 화면을 넘으면 verticalScroll.
+ * scale 의 transformOrigin 은 우측 중앙.
+ */
+@Composable
+private fun LandscapeOverlay(activity: MainActivity, cardAlpha: Float, cardScale: Float) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.systemBars)
+    ) {
+        TopBar(activity = activity)
+        Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 360.dp)
+                    .fillMaxHeight()
+                    .padding(end = 4.dp, bottom = 8.dp)
+                    .graphicsLayer {
+                        scaleX = cardScale
+                        scaleY = cardScale
+                        transformOrigin = TransformOrigin(1f, 0.5f)
+                    }
+                    .verticalScroll(rememberScrollState())
+            ) {
+                ControlsCard(activity = activity, cardAlpha = cardAlpha)
+            }
+        }
     }
 }
 
@@ -265,20 +335,20 @@ private fun OverflowMenu(activity: MainActivity) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ControlsCard(activity: MainActivity) {
+private fun ControlsCard(activity: MainActivity, cardAlpha: Float = 0.97f) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .shadow(4.dp, MaterialTheme.shapes.large),
         shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f)
+        color = MaterialTheme.colorScheme.surface.copy(alpha = cardAlpha)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (activity.isFieldSurveyMode()) {
                 FieldSurveyInputs(activity)
