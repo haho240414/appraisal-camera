@@ -25,7 +25,7 @@ private val LightColors = lightColorScheme(
 
     secondary = TossGreen500,
     onSecondary = White,
-    secondaryContainer = Color_TossGreen100,
+    secondaryContainer = TossGreen100,
     onSecondaryContainer = TossGreen600,
 
     tertiary = Gray700,
@@ -47,7 +47,7 @@ private val LightColors = lightColorScheme(
 
     error = TossRed500,
     onError = White,
-    errorContainer = androidx.compose.ui.graphics.Color(0xFFFEE4E2),
+    errorContainer = TossRed100,
     onErrorContainer = TossRed600
 )
 
@@ -70,6 +70,3 @@ fun AppraisalCameraTheme(
         content = content
     )
 }
-
-// secondaryContainer 용 약한 녹색 — Color.kt 확장.
-private val Color_TossGreen100 = androidx.compose.ui.graphics.Color(0xFFE6F9F0)

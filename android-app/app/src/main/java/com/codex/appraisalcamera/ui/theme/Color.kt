@@ -18,10 +18,12 @@ val TossBlue600 = Color(0xFF1B64DA)
 val TossBlue700 = Color(0xFF1851B4)
 
 // Success / accent
+val TossGreen100 = Color(0xFFE6F9F0)
 val TossGreen500 = Color(0xFF06C270)
 val TossGreen600 = Color(0xFF019B59)
 
 // Error
+val TossRed100 = Color(0xFFFEE4E2)
 val TossRed500 = Color(0xFFF04438)
 val TossRed600 = Color(0xFFD92D20)
 
