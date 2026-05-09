@@ -23,8 +23,6 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
@@ -286,6 +284,46 @@ private fun VerticalCategoryTabs(activity: MainActivity) {
 }
 
 @Composable
+private fun CompactVerticalCategoryTabs(activity: MainActivity) {
+    val items = listOf(
+        MainActivity.CATEGORY_LAND to "토지",
+        MainActivity.CATEGORY_BUILDING to "건물",
+        MainActivity.CATEGORY_EXTRA to "제시외",
+        MainActivity.CATEGORY_CUSTOM to "기타"
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        items.forEach { (key, label) ->
+            val selected = activity.currentCategory == key
+            Surface(
+                onClick = {
+                    if (activity.currentCategory != key) {
+                        activity.currentCategory = key
+                        activity.currentSymbol = ""
+                        activity.currentBuildingSub = ""
+                        activity.saveControlState()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(30.dp),
+                shape = MaterialTheme.shapes.small,
+                color = if (selected) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        label,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun HorizontalCategoryChips(activity: MainActivity) {
     val items = listOf(
         MainActivity.CATEGORY_LAND to "토지",
@@ -416,7 +454,7 @@ private fun BottomBar(activity: MainActivity, cardAlpha: Float) {
 /**
  * 가로 모드: 상단 바 + 우측 사이드패널.
  * 카메라 화면이 가려지지 않도록 컨트롤 카드를 오른쪽 320dp 폭에 한정.
- * 카드 높이가 화면을 넘으면 verticalScroll.
+ * 좌우 패널이 가로모드 검정 여백의 위아래를 채우도록 배치.
  * scale 의 transformOrigin 은 우측 중앙.
  */
 @Composable
@@ -434,10 +472,9 @@ private fun LandscapeOverlay(activity: MainActivity, cardAlpha: Float, cardScale
                 .padding(start = 6.dp, top = 4.dp, bottom = 4.dp)
                 .graphicsLayer {
                     scaleX = cardScale
-                    scaleY = cardScale
+                    scaleY = 1f
                     transformOrigin = TransformOrigin(0f, 0.5f)
                 }
-                .verticalScroll(rememberScrollState())
         ) {
             LandscapeActionRail(activity = activity, cardAlpha = cardAlpha)
         }
@@ -451,10 +488,9 @@ private fun LandscapeOverlay(activity: MainActivity, cardAlpha: Float, cardScale
                 .padding(end = 6.dp, top = 4.dp, bottom = 4.dp)
                 .graphicsLayer {
                     scaleX = cardScale
-                    scaleY = cardScale
+                    scaleY = 1f
                     transformOrigin = TransformOrigin(1f, 0.5f)
                 }
-                .verticalScroll(rememberScrollState())
         ) {
             NarrowControlsCard(activity = activity, cardAlpha = cardAlpha)
         }
@@ -720,11 +756,11 @@ private fun NarrowControlsCard(activity: MainActivity, cardAlpha: Float = 0.97f)
             if (activity.isFieldSurveyMode()) {
                 FieldSurveyInputs(activity)
             } else {
-                VerticalCategoryTabs(activity)
+                CompactVerticalCategoryTabs(activity)
                 CompactSymbolPicker(activity)
             }
-            MemoField(activity)
-            CaptureFab(activity, size = 58.dp)
+            CompactMemoField(activity)
+            CaptureFab(activity, size = 52.dp)
             OutlinedButton(
                 onClick = { activity.pickImage() },
                 modifier = Modifier.fillMaxWidth(),
@@ -990,6 +1026,21 @@ private fun MemoField(activity: MainActivity) {
         placeholder = { Text("전경, 진입로, 외벽, 내부 등") },
         singleLine = true,
         modifier = Modifier.fillMaxWidth()
+    )
+}
+
+@Composable
+private fun CompactMemoField(activity: MainActivity) {
+    OutlinedTextField(
+        value = activity.currentMemo,
+        onValueChange = {
+            activity.currentMemo = it
+            activity.saveControlState()
+        },
+        label = { Text("설명") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+        textStyle = MaterialTheme.typography.bodySmall
     )
 }
 
