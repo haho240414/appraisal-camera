@@ -807,6 +807,7 @@ class MainActivity : ComponentActivity() {
         val document = PdfDocument()
         val pageWidth = 595
         val pageHeight = 842
+        var totalDrawn = 0
         try {
             var i = 0
             while (i < sorted.size) {
@@ -814,12 +815,18 @@ class MainActivity : ComponentActivity() {
                 onProgress(pageNumber, totalPages)
                 val info = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
                 val page = document.startPage(info)
-                drawOutputPage(page.canvas, pageWidth, pageHeight, sorted, i, pageNumber)
+                totalDrawn += drawOutputPage(page.canvas, pageWidth, pageHeight, sorted, i, pageNumber)
                 document.finishPage(page)
                 i += 2
             }
             val output = ByteArrayOutputStream()
             document.writeTo(output)
+            val skipped = sorted.size - totalDrawn
+            if (skipped > 0) {
+                runOnUiSafely {
+                    Toast.makeText(this, "PDF: ${skipped}장이 디코드 실패로 누락됨", Toast.LENGTH_LONG).show()
+                }
+            }
             return output.toByteArray()
         } finally {
             document.close()
@@ -834,6 +841,7 @@ class MainActivity : ComponentActivity() {
         val files = ArrayList<ExportFile>()
         val pageWidth = 1240
         val pageHeight = 1754
+        var totalDrawn = 0
         var i = 0
         while (i < sorted.size) {
             val pageNumber = (i / 2) + 1
@@ -841,7 +849,7 @@ class MainActivity : ComponentActivity() {
             val bitmap = Bitmap.createBitmap(pageWidth, pageHeight, Bitmap.Config.ARGB_8888)
             try {
                 val canvas = Canvas(bitmap)
-                drawOutputPage(canvas, pageWidth, pageHeight, sorted, i, pageNumber)
+                totalDrawn += drawOutputPage(canvas, pageWidth, pageHeight, sorted, i, pageNumber)
                 val output = ByteArrayOutputStream()
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output)
                 files.add(ExportFile(pageJpgFileName(pageNumber), JPG_MIME, output.toByteArray()))
@@ -850,11 +858,17 @@ class MainActivity : ComponentActivity() {
             }
             i += 2
         }
+        val skipped = sorted.size - totalDrawn
+        if (skipped > 0) {
+            runOnUiSafely {
+                Toast.makeText(this, "JPG: ${skipped}장이 디코드 실패로 누락됨", Toast.LENGTH_LONG).show()
+            }
+        }
         return files
     }
 
-    @Throws(IOException::class)
-    private fun drawOutputPage(canvas: Canvas, pageWidth: Int, pageHeight: Int, sorted: List<PhotoItem>, startIndex: Int, pageNumber: Int) {
+    /** @return 이 페이지에서 정상적으로 그려진 사진 수 (0~2). */
+    private fun drawOutputPage(canvas: Canvas, pageWidth: Int, pageHeight: Int, sorted: List<PhotoItem>, startIndex: Int, pageNumber: Int): Int {
         val sx = pageWidth / 595f
         val sy = pageHeight / 842f
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
@@ -875,9 +889,14 @@ class MainActivity : ComponentActivity() {
         paint.textSize = 10f * sx
         canvas.drawText("Page : $pageNumber", 530f * sx, 105f * sy, paint)
 
-        drawOutputPhoto(canvas, sorted[startIndex], RectF(70f * sx, 120f * sy, 525f * sx, 335f * sy), 348f * sy, sx)
+        var drawnCount = 0
+        if (drawOutputPhoto(canvas, sorted[startIndex], RectF(70f * sx, 120f * sy, 525f * sx, 335f * sy), 348f * sy, sx)) {
+            drawnCount++
+        }
         if (startIndex + 1 < sorted.size) {
-            drawOutputPhoto(canvas, sorted[startIndex + 1], RectF(70f * sx, 430f * sy, 525f * sx, 645f * sy), 658f * sy, sx)
+            if (drawOutputPhoto(canvas, sorted[startIndex + 1], RectF(70f * sx, 430f * sy, 525f * sx, 645f * sy), 658f * sy, sx)) {
+                drawnCount++
+            }
         }
 
         paint.color = Color.rgb(20, 20, 20)
@@ -885,10 +904,13 @@ class MainActivity : ComponentActivity() {
         paint.typeface = Typeface.DEFAULT
         paint.textSize = 10f * sx
         canvas.drawText("Page : $pageNumber", 530f * sx, 815f * sy, paint)
+        return drawnCount
     }
 
-    @Throws(IOException::class)
-    private fun drawOutputPhoto(canvas: Canvas, photo: PhotoItem, frame: RectF, captionBaseline: Float, scale: Float) {
+    /**
+     * @return true 이면 사진을 정상적으로 그렸음, false 면 디코드 실패하여 회색 박스만 그림.
+     */
+    private fun drawOutputPhoto(canvas: Canvas, photo: PhotoItem, frame: RectF, captionBaseline: Float, scale: Float): Boolean {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
         paint.style = Paint.Style.FILL
         paint.color = Color.rgb(245, 245, 245)
@@ -896,13 +918,22 @@ class MainActivity : ComponentActivity() {
 
         var bitmap: Bitmap? = null
         var oriented: Bitmap? = null
+        var drewPhoto = false
         try {
             val uri = Uri.parse(photo.uri)
-            bitmap = decodeBitmap(uri, 2200)
+            // 1차 시도: 1400px (PDF/JPG 출력 프레임이 ~1200x510px 정도여서 충분).
+            bitmap = decodeBitmap(uri, 1400)
+            // 2차 시도: 메모리 부족 등으로 1차 실패 시 더 작게.
+            if (bitmap == null) {
+                bitmap = decodeBitmap(uri, 800)
+            }
             if (bitmap != null) {
                 oriented = rotateBitmap(bitmap, readExifOrientation(uri))
                 drawBitmapCenterCrop(canvas, oriented, frame, paint)
+                drewPhoto = true
             }
+        } catch (_: Throwable) {
+            // OOM 등 어떤 오류든 이 사진만 skip — 회색 박스는 이미 그려져 있음.
         } finally {
             if (oriented != null && oriented !== bitmap) oriented.recycle()
             bitmap?.recycle()
@@ -921,6 +952,7 @@ class MainActivity : ComponentActivity() {
         paint.typeface = Typeface.DEFAULT
         paint.textSize = 12f * scale
         canvas.drawText(photoCaption(photo), frame.centerX(), captionBaseline, paint)
+        return drewPhoto
     }
 
     private fun drawBitmapCenterCrop(canvas: Canvas, bitmap: Bitmap, dst: RectF, paint: Paint) {
