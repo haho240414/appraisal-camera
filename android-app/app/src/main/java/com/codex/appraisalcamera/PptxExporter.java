@@ -12,6 +12,8 @@ import android.media.ExifInterface;
 import android.net.Uri;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -124,7 +126,7 @@ final class PptxExporter {
     private static byte[] readJpeg(Context context, PhotoData photo) throws IOException {
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
-        try (InputStream input = context.getContentResolver().openInputStream(photo.uri)) {
+        try (InputStream input = openImageInputStream(context, photo.uri)) {
             if (input == null) throw new IOException("Cannot open image");
             BitmapFactory.decodeStream(input, null, bounds);
         }
@@ -138,7 +140,7 @@ final class PptxExporter {
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sample;
         Bitmap bitmap;
-        try (InputStream input = context.getContentResolver().openInputStream(photo.uri)) {
+        try (InputStream input = openImageInputStream(context, photo.uri)) {
             if (input == null) throw new IOException("Cannot open image");
             bitmap = BitmapFactory.decodeStream(input, null, options);
         }
@@ -161,7 +163,7 @@ final class PptxExporter {
     }
 
     private static int readExifOrientation(Context context, Uri uri) {
-        try (InputStream input = context.getContentResolver().openInputStream(uri)) {
+        try (InputStream input = openImageInputStream(context, uri)) {
             if (input == null) {
                 return ExifInterface.ORIENTATION_NORMAL;
             }
@@ -170,6 +172,13 @@ final class PptxExporter {
         } catch (IOException ignored) {
             return ExifInterface.ORIENTATION_NORMAL;
         }
+    }
+
+    private static InputStream openImageInputStream(Context context, Uri uri) throws IOException {
+        if ("file".equals(uri.getScheme()) && uri.getPath() != null) {
+            return new FileInputStream(new File(uri.getPath()));
+        }
+        return context.getContentResolver().openInputStream(uri);
     }
 
     private static Bitmap rotateBitmap(Bitmap source, int orientation) {

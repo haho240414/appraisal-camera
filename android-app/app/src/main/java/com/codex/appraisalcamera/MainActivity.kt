@@ -51,6 +51,7 @@ import org.json.JSONException
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
@@ -334,6 +335,14 @@ class MainActivity : ComponentActivity() {
     }
 
     @Throws(IOException::class)
+    private fun openImageInputStream(uri: Uri): InputStream? {
+        if (uri.scheme == "file" && uri.path != null) {
+            return FileInputStream(File(uri.path!!))
+        }
+        return contentResolver.openInputStream(uri)
+    }
+
+    @Throws(IOException::class)
     private fun openImageOutputStream(uri: Uri): OutputStream? {
         if (uri.scheme == "file" && uri.path != null) {
             return FileOutputStream(File(uri.path!!))
@@ -344,7 +353,7 @@ class MainActivity : ComponentActivity() {
     @Throws(IOException::class)
     private fun decodeBitmap(uri: Uri, maxSideLimit: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        contentResolver.openInputStream(uri)?.use { input ->
+        openImageInputStream(uri)?.use { input ->
             BitmapFactory.decodeStream(input, null, bounds)
         } ?: return null
 
@@ -353,7 +362,7 @@ class MainActivity : ComponentActivity() {
         while (maxSide / sample > maxSideLimit) sample *= 2
 
         val options = BitmapFactory.Options().apply { inSampleSize = sample }
-        contentResolver.openInputStream(uri)?.use { input ->
+        openImageInputStream(uri)?.use { input ->
             return BitmapFactory.decodeStream(input, null, options)
         }
         return null
@@ -361,7 +370,7 @@ class MainActivity : ComponentActivity() {
 
     private fun readExifOrientation(uri: Uri): Int {
         try {
-            contentResolver.openInputStream(uri)?.use { input ->
+            openImageInputStream(uri)?.use { input ->
                 val exif = ExifInterface(input)
                 return exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
             }
