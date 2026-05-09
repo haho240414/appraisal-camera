@@ -322,9 +322,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun preserveExifDateTime(uri: Uri, capturedAt: Long) {
-        if (uri.scheme != "file" || uri.path == null) return
+        if (uri.scheme != "file") return
+        val file = fileFromUri(uri) ?: return
         try {
-            val exif = ExifInterface(uri.path!!)
+            val exif = ExifInterface(file.absolutePath)
             val exifTime = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).format(Date(capturedAt))
             exif.setAttribute(ExifInterface.TAG_DATETIME, exifTime)
             exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, exifTime)
@@ -336,32 +337,86 @@ class MainActivity : ComponentActivity() {
 
     @Throws(IOException::class)
     private fun openImageInputStream(uri: Uri): InputStream? {
-        if (uri.scheme == "file" && uri.path != null) {
-            return FileInputStream(File(uri.path!!))
+        if (uri.scheme == "file") {
+            val file = fileFromUri(uri) ?: return null
+            return FileInputStream(file)
         }
         return contentResolver.openInputStream(uri)
     }
 
     @Throws(IOException::class)
     private fun openImageOutputStream(uri: Uri): OutputStream? {
-        if (uri.scheme == "file" && uri.path != null) {
-            return FileOutputStream(File(uri.path!!))
+        if (uri.scheme == "file") {
+            val file = fileFromUri(uri) ?: return null
+            return FileOutputStream(file)
         }
         return contentResolver.openOutputStream(uri, "w")
     }
 
+    private fun fileFromUri(uri: Uri): File? {
+        if (uri.scheme != "file") return null
+        val candidates = arrayListOf<String>()
+        uri.path?.let { candidates.add(it) }
+        uri.encodedPath?.let { candidates.add(Uri.decode(it)) }
+        for (path in candidates.distinct()) {
+            val file = File(path)
+            if (file.exists()) return file
+        }
+        return candidates.firstOrNull()?.let { File(it) }
+    }
+
     @Throws(IOException::class)
     private fun decodeBitmap(uri: Uri, maxSideLimit: Int): Bitmap? {
+        if (uri.scheme == "file") {
+            val file = fileFromUri(uri)
+            if (file != null) {
+                decodeFileBitmap(file, maxSideLimit)?.let { return it }
+            }
+        }
+
+        return decodeStreamBitmap(uri, maxSideLimit)
+    }
+
+    private fun decodeFileBitmap(file: File, maxSideLimit: Int): Bitmap? {
+        if (!file.exists() || file.length() <= 0L) return null
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        openImageInputStream(uri)?.use { input ->
-            BitmapFactory.decodeStream(input, null, bounds)
-        } ?: return null
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            FileInputStream(file).use { input ->
+                BitmapFactory.decodeFileDescriptor(input.fd, null, bounds)
+            }
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
         val maxSide = maxOf(bounds.outWidth, bounds.outHeight)
         var sample = 1
         while (maxSide / sample > maxSideLimit) sample *= 2
 
-        val options = BitmapFactory.Options().apply { inSampleSize = sample }
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        return BitmapFactory.decodeFile(file.absolutePath, options) ?: FileInputStream(file).use { input ->
+            BitmapFactory.decodeFileDescriptor(input.fd, null, options)
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun decodeStreamBitmap(uri: Uri, maxSideLimit: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        openImageInputStream(uri)?.use { input ->
+            BitmapFactory.decodeStream(input, null, bounds)
+        } ?: return null
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        val maxSide = maxOf(bounds.outWidth, bounds.outHeight)
+        var sample = 1
+        while (maxSide / sample > maxSideLimit) sample *= 2
+
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
         openImageInputStream(uri)?.use { input ->
             return BitmapFactory.decodeStream(input, null, options)
         }
@@ -370,6 +425,11 @@ class MainActivity : ComponentActivity() {
 
     private fun readExifOrientation(uri: Uri): Int {
         try {
+            if (uri.scheme == "file") {
+                val file = fileFromUri(uri) ?: return ExifInterface.ORIENTATION_NORMAL
+                val exif = ExifInterface(file.absolutePath)
+                return exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+            }
             openImageInputStream(uri)?.use { input ->
                 val exif = ExifInterface(input)
                 return exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
@@ -469,8 +529,7 @@ class MainActivity : ComponentActivity() {
     private fun deleteAppPhotoFile(photo: PhotoItem) {
         try {
             val uri = Uri.parse(photo.uri)
-            if (uri.scheme != "file" || uri.path == null) return
-            val file = File(uri.path!!)
+            val file = fileFromUri(uri) ?: return
             val filePath = file.canonicalPath
             val externalRoot = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
             val internalRoot = File(filesDir, "Pictures")
@@ -773,12 +832,11 @@ class MainActivity : ComponentActivity() {
         return try {
             val parsed = Uri.parse(uri)
             if (parsed.scheme == "file") {
-                val path = parsed.path ?: return false
-                val file = File(path)
+                val file = fileFromUri(parsed) ?: return false
                 return file.exists() && file.length() > 0L
             }
             // content:// : 스트림이 한 번 열리면 OK.
-            contentResolver.openInputStream(parsed)?.use { it.read() }
+            openImageInputStream(parsed)?.use { it.read() }
             true
         } catch (_: Exception) {
             false

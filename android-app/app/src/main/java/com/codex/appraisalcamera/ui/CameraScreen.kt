@@ -139,57 +139,30 @@ private fun PortraitOverlay(activity: MainActivity, cardAlpha: Float, cardScale:
     ) {
         TopBar(activity = activity)
 
-        // 가운데 영역: 좌측 사이드 + 카메라 표시 영역(투명 spacer) + 우측 사이드
+        // 카메라 중심부는 최대한 비워두고, 조작 가이드는 아래 검정 여백에 모은다.
+        Spacer(Modifier.weight(1f))
+
         Row(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 좌측 패널 — 카테고리 + 기호
-            Box(
-                modifier = Modifier
-                    .padding(start = 8.dp)
-                    .widthIn(max = 130.dp)
-                    .graphicsLayer {
-                        scaleX = cardScale
-                        scaleY = cardScale
-                        transformOrigin = TransformOrigin(0f, 0.5f)
-                    }
-            ) {
-                LeftSidePanel(activity, cardAlpha)
-            }
-
-            // 카메라가 통과해서 보이는 영역
-            Spacer(Modifier.weight(1f))
-
-            // 우측 패널 — 촬영 / 이미지 선택
-            Box(
-                modifier = Modifier
-                    .padding(end = 8.dp)
-                    .widthIn(max = 110.dp)
-                    .graphicsLayer {
-                        scaleX = cardScale
-                        scaleY = cardScale
-                        transformOrigin = TransformOrigin(1f, 0.5f)
-                    }
-            ) {
-                RightSidePanel(activity, cardAlpha)
-            }
-        }
-
-        // 하단 메모/현지답사 입력 영역 (얇은 한 줄)
-        Box(
-            modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp)
                 .graphicsLayer {
                     scaleX = cardScale
                     scaleY = cardScale
                     transformOrigin = TransformOrigin(0.5f, 1f)
-                }
+                },
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            BottomBar(activity, cardAlpha)
+            Box(modifier = Modifier.widthIn(max = 126.dp).weight(0.9f)) {
+                LeftSidePanel(activity, cardAlpha)
+            }
+            Box(modifier = Modifier.weight(1.4f)) {
+                BottomBar(activity, cardAlpha)
+            }
+            Box(modifier = Modifier.widthIn(max = 106.dp).weight(0.8f)) {
+                RightSidePanel(activity, cardAlpha)
+            }
         }
     }
 }
@@ -362,28 +335,94 @@ private fun BottomBar(activity: MainActivity, cardAlpha: Float) {
  */
 @Composable
 private fun LandscapeOverlay(activity: MainActivity, cardAlpha: Float, cardScale: Float) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.systemBars)
+            .windowInsetsPadding(WindowInsets.systemBars),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        TopBar(activity = activity)
-        Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            Spacer(Modifier.weight(1f))
-            Box(
-                modifier = Modifier
-                    .widthIn(max = 360.dp)
-                    .fillMaxHeight()
-                    .padding(end = 4.dp, bottom = 8.dp)
-                    .graphicsLayer {
-                        scaleX = cardScale
-                        scaleY = cardScale
-                        transformOrigin = TransformOrigin(1f, 0.5f)
-                    }
-                    .verticalScroll(rememberScrollState())
+        Box(
+            modifier = Modifier
+                .widthIn(max = 176.dp)
+                .fillMaxHeight()
+                .padding(start = 6.dp, top = 8.dp, bottom = 8.dp)
+                .graphicsLayer {
+                    scaleX = cardScale
+                    scaleY = cardScale
+                    transformOrigin = TransformOrigin(0f, 0.5f)
+                }
+                .verticalScroll(rememberScrollState())
+        ) {
+            LandscapeActionRail(activity = activity, cardAlpha = cardAlpha)
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        Box(
+            modifier = Modifier
+                .widthIn(max = 330.dp)
+                .fillMaxHeight()
+                .padding(end = 6.dp, top = 8.dp, bottom = 8.dp)
+                .graphicsLayer {
+                    scaleX = cardScale
+                    scaleY = cardScale
+                    transformOrigin = TransformOrigin(1f, 0.5f)
+                }
+                .verticalScroll(rememberScrollState())
+        ) {
+            ControlsCard(activity = activity, cardAlpha = cardAlpha)
+        }
+    }
+}
+
+@Composable
+private fun LandscapeActionRail(activity: MainActivity, cardAlpha: Float) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(2.dp, MaterialTheme.shapes.large),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f.coerceAtMost(cardAlpha + 0.08f)),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            FilledTonalButton(
+                onClick = { activity.showModeDialog() },
+                shape = MaterialTheme.shapes.small,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                ControlsCard(activity = activity, cardAlpha = cardAlpha)
+                Text(activity.modeLabel(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
+
+            Surface(
+                onClick = { activity.showAddressDialog() },
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 9.dp, vertical = 8.dp)) {
+                    Text("물건지", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = activity.propertyAddress.ifBlank { "주소 입력" },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2
+                    )
+                }
+            }
+
+            CompactActionButton("저장") { activity.showExportFormatDialog() }
+            CompactActionButton("공유") { activity.showEmailDialog() }
+            OverflowMenu(activity = activity)
         }
     }
 }

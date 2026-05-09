@@ -175,10 +175,23 @@ final class PptxExporter {
     }
 
     private static InputStream openImageInputStream(Context context, Uri uri) throws IOException {
-        if ("file".equals(uri.getScheme()) && uri.getPath() != null) {
-            return new FileInputStream(new File(uri.getPath()));
+        if ("file".equals(uri.getScheme())) {
+            File file = fileFromUri(uri);
+            return file == null ? null : new FileInputStream(file);
         }
         return context.getContentResolver().openInputStream(uri);
+    }
+
+    private static File fileFromUri(Uri uri) {
+        if (!"file".equals(uri.getScheme())) return null;
+        ArrayList<String> candidates = new ArrayList<>();
+        if (uri.getPath() != null) candidates.add(uri.getPath());
+        if (uri.getEncodedPath() != null) candidates.add(Uri.decode(uri.getEncodedPath()));
+        for (String path : candidates) {
+            File file = new File(path);
+            if (file.exists()) return file;
+        }
+        return candidates.isEmpty() ? null : new File(candidates.get(0));
     }
 
     private static Bitmap rotateBitmap(Bitmap source, int orientation) {
