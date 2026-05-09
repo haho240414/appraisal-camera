@@ -272,6 +272,14 @@ private fun SettingsSheet(activity: MainActivity) {
                 valueRange = 60f..100f
             )
 
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            SettingRow(
+                title = "플로팅 촬영 버튼",
+                value = if (activity.floatingCaptureButton) "켜짐" else "꺼짐",
+                onClick = { activity.toggleFloatingCaptureButton() }
+            )
+
             Spacer(Modifier.height(20.dp))
 
             Row(

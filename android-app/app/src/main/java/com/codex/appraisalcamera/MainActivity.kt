@@ -91,6 +91,7 @@ class MainActivity : ComponentActivity() {
     var mailAppPref by mutableStateOf(MAIL_APP_OTHER)
     var guideAlphaPercent by mutableStateOf(82)
     var guideScalePercent by mutableStateOf(78)
+    var floatingCaptureButton by mutableStateOf(true)
 
     /** 현재 열려 있는 시트/다이얼로그. CameraScreen 이 관찰. */
     var openSheet by mutableStateOf<AppSheet>(AppSheet.None)
@@ -746,6 +747,12 @@ class MainActivity : ComponentActivity() {
     fun resetGuideDefaults() {
         guideAlphaPercent = 82
         guideScalePercent = 78
+        floatingCaptureButton = true
+        saveGuideSettings()
+    }
+
+    fun toggleFloatingCaptureButton() {
+        floatingCaptureButton = !floatingCaptureButton
         saveGuideSettings()
     }
 
@@ -1357,12 +1364,14 @@ class MainActivity : ComponentActivity() {
         val p = prefs()
         guideAlphaPercent = clamp(p.getInt(PREF_GUIDE_ALPHA, 82), 35, 100)
         guideScalePercent = clamp(p.getInt(PREF_GUIDE_SCALE, 78), 60, 100)
+        floatingCaptureButton = p.getBoolean(PREF_FLOATING_CAPTURE, true)
     }
 
     private fun saveGuideSettings() {
         prefs().edit()
             .putInt(PREF_GUIDE_ALPHA, guideAlphaPercent)
             .putInt(PREF_GUIDE_SCALE, guideScalePercent)
+            .putBoolean(PREF_FLOATING_CAPTURE, floatingCaptureButton)
             .apply()
     }
 
@@ -1471,6 +1480,7 @@ class MainActivity : ComponentActivity() {
         const val PREF_CURRENT_MEMO = "current_memo"
         const val PREF_GUIDE_ALPHA = "guide_alpha_percent"
         const val PREF_GUIDE_SCALE = "guide_scale_percent"
+        const val PREF_FLOATING_CAPTURE = "floating_capture_button"
         const val STATE_CURRENT_CATEGORY = "state_current_category"
         const val STATE_CURRENT_SYMBOL = "state_current_symbol"
         const val STATE_CURRENT_BUILDING_SUB = "state_current_building_sub"

@@ -114,6 +114,10 @@ fun CameraScreen(activity: MainActivity) {
             PortraitOverlay(activity, cardAlpha, cardScale)
         }
 
+        if (isLandscape && activity.floatingCaptureButton) {
+            FloatingCaptureButton(activity)
+        }
+
         // 시트/다이얼로그 디스패처
         AppSheets(activity = activity)
     }
@@ -432,6 +436,28 @@ private fun CaptureFab(activity: MainActivity, size: Dp) {
     }
 }
 
+@Composable
+private fun BoxScope.FloatingCaptureButton(activity: MainActivity) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primary,
+        shadowElevation = 8.dp,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(bottom = 18.dp)
+            .size(72.dp),
+        onClick = { activity.capturePhoto() }
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(30.dp)
+            ) {}
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BottomBar(activity: MainActivity, cardAlpha: Float) {
@@ -467,14 +493,9 @@ private fun LandscapeOverlay(activity: MainActivity, cardAlpha: Float, cardScale
     ) {
         Box(
             modifier = Modifier
-                .widthIn(max = 176.dp)
+                .width(176.dp)
                 .fillMaxHeight()
                 .padding(start = 6.dp, top = 4.dp, bottom = 4.dp)
-                .graphicsLayer {
-                    scaleX = cardScale
-                    scaleY = 1f
-                    transformOrigin = TransformOrigin(0f, 0.5f)
-                }
         ) {
             LandscapeActionRail(activity = activity, cardAlpha = cardAlpha)
         }
@@ -483,14 +504,9 @@ private fun LandscapeOverlay(activity: MainActivity, cardAlpha: Float, cardScale
 
         Box(
             modifier = Modifier
-                .widthIn(max = 188.dp)
+                .width(188.dp)
                 .fillMaxHeight()
                 .padding(end = 6.dp, top = 4.dp, bottom = 4.dp)
-                .graphicsLayer {
-                    scaleX = cardScale
-                    scaleY = 1f
-                    transformOrigin = TransformOrigin(1f, 0.5f)
-                }
         ) {
             NarrowControlsCard(activity = activity, cardAlpha = cardAlpha)
         }
@@ -545,9 +561,35 @@ private fun LandscapeActionRail(activity: MainActivity, cardAlpha: Float) {
                 }
             }
 
-            CompactActionButton("저장") { activity.showExportFormatDialog() }
-            CompactActionButton("공유") { activity.showEmailDialog() }
-            OverflowMenu(activity = activity)
+            RailActionButton("저장") { activity.showExportFormatDialog() }
+            RailActionButton("공유") { activity.showEmailDialog() }
+            RailActionButton("목록") { activity.showPhotoListDialog() }
+            RailActionButton("설정") { activity.showGuideSettingsDialog() }
+            RailActionButton("도움말") { activity.showHelpDialog() }
+            RailActionButton("전체삭제", danger = true) { activity.confirmClear() }
+        }
+    }
+}
+
+@Composable
+private fun RailActionButton(text: String, danger: Boolean = false, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.small,
+        color = if (danger) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth().height(28.dp)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 6.dp)
+        ) {
+            Text(
+                text,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (danger) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
         }
     }
 }
@@ -760,7 +802,9 @@ private fun NarrowControlsCard(activity: MainActivity, cardAlpha: Float = 0.97f)
                 CompactSymbolPicker(activity)
             }
             CompactMemoField(activity)
-            CaptureFab(activity, size = 52.dp)
+            if (!activity.floatingCaptureButton) {
+                CaptureFab(activity, size = 52.dp)
+            }
             OutlinedButton(
                 onClick = { activity.pickImage() },
                 modifier = Modifier.fillMaxWidth(),
