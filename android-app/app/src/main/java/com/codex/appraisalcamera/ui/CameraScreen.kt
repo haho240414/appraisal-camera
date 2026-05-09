@@ -142,7 +142,7 @@ private fun PortraitOverlay(activity: MainActivity, cardAlpha: Float, cardScale:
         // 카메라 중심부는 최대한 비워두고, 조작 가이드는 아래 검정 여백에 모은다.
         Spacer(Modifier.weight(1f))
 
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 6.dp)
@@ -150,23 +150,16 @@ private fun PortraitOverlay(activity: MainActivity, cardAlpha: Float, cardScale:
                     scaleX = cardScale
                     scaleY = cardScale
                     transformOrigin = TransformOrigin(0.5f, 1f)
-                },
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                }
         ) {
-            Box(modifier = Modifier.weight(1f)) {
-                PortraitBottomGuide(activity, cardAlpha)
-            }
-            Box(modifier = Modifier.widthIn(max = 106.dp).weight(0.8f)) {
-                RightSidePanel(activity, cardAlpha)
-            }
+            PortraitUnifiedGuide(activity, cardAlpha)
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PortraitBottomGuide(activity: MainActivity, cardAlpha: Float) {
+private fun PortraitUnifiedGuide(activity: MainActivity, cardAlpha: Float) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -174,17 +167,45 @@ private fun PortraitBottomGuide(activity: MainActivity, cardAlpha: Float) {
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface.copy(alpha = cardAlpha)
     ) {
-        Column(
+        Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (activity.isFieldSurveyMode()) {
-                FieldSurveyInputs(activity)
-            } else {
-                HorizontalCategoryChips(activity)
-                SymbolPicker(activity)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (activity.isFieldSurveyMode()) {
+                    FieldSurveyInputs(activity)
+                } else {
+                    HorizontalCategoryChips(activity)
+                    SymbolPicker(activity)
+                }
+                MemoField(activity)
             }
-            MemoField(activity)
+
+            Column(
+                modifier = Modifier.width(96.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                val count = activity.photos.size
+                Text(
+                    if (count == 0) "0장" else "${count}장",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                CaptureFab(activity, size = 58.dp)
+                OutlinedButton(
+                    onClick = { activity.pickImage() },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.small,
+                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 3.dp)
+                ) {
+                    Text("이미지", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                }
+            }
         }
     }
 }
@@ -410,7 +431,7 @@ private fun LandscapeOverlay(activity: MainActivity, cardAlpha: Float, cardScale
             modifier = Modifier
                 .widthIn(max = 176.dp)
                 .fillMaxHeight()
-                .padding(start = 6.dp, top = 8.dp, bottom = 8.dp)
+                .padding(start = 6.dp, top = 4.dp, bottom = 4.dp)
                 .graphicsLayer {
                     scaleX = cardScale
                     scaleY = cardScale
@@ -427,7 +448,7 @@ private fun LandscapeOverlay(activity: MainActivity, cardAlpha: Float, cardScale
             modifier = Modifier
                 .widthIn(max = 188.dp)
                 .fillMaxHeight()
-                .padding(end = 6.dp, top = 8.dp, bottom = 8.dp)
+                .padding(end = 6.dp, top = 4.dp, bottom = 4.dp)
                 .graphicsLayer {
                     scaleX = cardScale
                     scaleY = cardScale
@@ -445,13 +466,16 @@ private fun LandscapeActionRail(activity: MainActivity, cardAlpha: Float) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .fillMaxHeight()
             .shadow(2.dp, MaterialTheme.shapes.large),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f.coerceAtMost(cardAlpha + 0.08f)),
         shape = MaterialTheme.shapes.large,
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             FilledTonalButton(
@@ -680,6 +704,7 @@ private fun NarrowControlsCard(activity: MainActivity, cardAlpha: Float = 0.97f)
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .fillMaxHeight()
             .shadow(2.dp, MaterialTheme.shapes.large),
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface.copy(alpha = cardAlpha)
@@ -687,8 +712,9 @@ private fun NarrowControlsCard(activity: MainActivity, cardAlpha: Float = 0.97f)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight()
                 .padding(horizontal = 10.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (activity.isFieldSurveyMode()) {
