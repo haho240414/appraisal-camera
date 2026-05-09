@@ -1,0 +1,689 @@
+package com.codex.appraisalcamera.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.codex.appraisalcamera.AppSheet
+import com.codex.appraisalcamera.MainActivity
+
+/**
+ * 메인 화면에 떠 있는 시트/다이얼로그 디스패처.
+ * activity.openSheet 를 관찰해서 적절한 sheet 또는 dialog 를 그린다.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AppSheets(activity: MainActivity) {
+    when (val sheet = activity.openSheet) {
+        AppSheet.None -> Unit
+        AppSheet.PhotoList -> PhotoListSheet(activity)
+        AppSheet.Settings -> SettingsSheet(activity)
+        AppSheet.Help -> HelpSheet(activity)
+        AppSheet.Address -> AddressSheet(activity)
+        AppSheet.EmailRecipient -> EmailRecipientSheet(activity)
+        AppSheet.MailApp -> MailAppDialog(activity)
+        AppSheet.Mode -> ModeDialog(activity)
+        AppSheet.ExportFormat -> ExportFormatDialog(activity)
+        is AppSheet.ShareFormat -> ShareFormatDialog(activity, sheet.recipient)
+        AppSheet.ConfirmClear -> ConfirmClearDialog(activity)
+        is AppSheet.ConfirmDelete -> ConfirmDeleteDialog(activity, sheet.photo)
+    }
+}
+
+// =================================================================
+// Bottom Sheets
+// =================================================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PhotoListSheet(activity: MainActivity) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sorted = activity.sortedPhotos()
+    ModalBottomSheet(
+        onDismissRequest = { activity.closeSheet() },
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 20.dp)
+        ) {
+            // Toss 풍 큰 헤더
+            Text(
+                text = "사진 자료",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = sorted.size.toString(),
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "장 등록됨",
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.heightIn(max = 600.dp)
+            ) {
+                items(sorted, key = { it.id }) { photo ->
+                    PhotoCard(activity, photo)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhotoCard(activity: MainActivity, photo: MainActivity.PhotoItem) {
+    Card(
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 썸네일 — Coil 미설치이므로 일단 회색 박스 + 아이콘 텍스트.
+            // (D4 에서 Coil 추가하거나 Glide 로 썸네일 표시)
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .background(MaterialTheme.colorScheme.surface),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = photo.symbol.take(3),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = activity.photoTitle(photo),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = activity.photoMetaText(photo),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            TextButton(
+                onClick = { activity.confirmDeletePhoto(photo) },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Text("삭제", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsSheet(activity: MainActivity) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var alpha by remember { mutableStateOf(activity.guideAlphaPercent.toFloat()) }
+    var scale by remember { mutableStateOf(activity.guideScalePercent.toFloat()) }
+
+    ModalBottomSheet(
+        onDismissRequest = { activity.closeSheet() },
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+                .padding(bottom = 12.dp)
+        ) {
+            Text(
+                "설정",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(20.dp))
+
+            // 메일주소
+            SettingRow(
+                title = "기본 메일주소",
+                value = activity.emailRecipient.ifEmpty { "미설정" },
+                onClick = { activity.showEmailAddressSheet() }
+            )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            // 공유 방식
+            SettingRow(
+                title = "기본 공유 방식",
+                value = activity.mailAppLabel(activity.mailAppPref),
+                onClick = { activity.showMailAppSheet() }
+            )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            // 가이드 투명도
+            Text(
+                "배경 불투명도 ${alpha.toInt()}%",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Slider(
+                value = alpha,
+                onValueChange = { alpha = it },
+                onValueChangeFinished = { activity.applyGuideAlpha(alpha.toInt()) },
+                valueRange = 35f..100f
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                "가이드 크기 ${scale.toInt()}%",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Slider(
+                value = scale,
+                onValueChange = { scale = it },
+                onValueChangeFinished = { activity.applyGuideScale(scale.toInt()) },
+                valueRange = 60f..100f
+            )
+
+            Spacer(Modifier.height(20.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        activity.resetGuideDefaults()
+                        alpha = activity.guideAlphaPercent.toFloat()
+                        scale = activity.guideScalePercent.toFloat()
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Text("기본값")
+                }
+                Button(
+                    onClick = { activity.closeSheet() },
+                    modifier = Modifier.weight(1f),
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Text("닫기")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingRow(title: String, value: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.small)
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Text(
+            "›",
+            fontSize = 24.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HelpSheet(activity: MainActivity) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val items = listOf(
+        "자체감정 / 현지답사" to "작업 모드를 전환합니다. 주소 미입력 시 자동 제목/파일명에 반영됩니다.",
+        "물건지" to "사진자료 상단 주소. 입력한 주소별로 앱 내부 사진 폴더가 나뉩니다.",
+        "채무자 / 답사자" to "현지답사 모드에서만 표시. 사진 설명에 함께 저장됩니다.",
+        "저장" to "PPTX / PDF / JPG 중 선택해 외부 저장소에 저장.",
+        "공유" to "Gmail 또는 다른 앱으로 사진자료 공유.",
+        "목록" to "등록된 사진을 분류 순서로 확인 / 개별 삭제.",
+        "전체삭제" to "사진 + 앱 내부 파일 모두 제거. 되돌릴 수 없습니다.",
+        "설정" to "메일주소 / 공유앱 / 가이드 투명도·크기.",
+        "토지 / 건물 / 제시외 / 기타" to "토지=숫자, 건물=가나다, 제시외=ㄱㄴㄷ, 기타=직접입력.",
+        "기호 선택" to "선택 분류의 다음 미사용 기호가 자동 입력됩니다.",
+        "사진 설명" to "비워두면 분류+기호 자동 사용.",
+        "촬영 / 이미지 선택" to "촬영하거나 갤러리에서 사진 추가."
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = { activity.closeSheet() },
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 20.dp)
+        ) {
+            Text(
+                "도움말",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "현장에서 자주 쓰는 기능들의 역할입니다.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(16.dp))
+
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 500.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items.forEach { (title, desc) ->
+                    Card(
+                        shape = MaterialTheme.shapes.medium,
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                title,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                desc,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddressSheet(activity: MainActivity) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var text by remember { mutableStateOf(activity.propertyAddress) }
+    ModalBottomSheet(
+        onDismissRequest = { activity.closeSheet() },
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+                .imePadding()
+        ) {
+            Text(
+                "물건지 주소",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("주소") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { activity.closeSheet() },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("취소")
+                }
+                Button(
+                    onClick = {
+                        activity.applyAddress(text)
+                        activity.closeSheet()
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("저장")
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EmailRecipientSheet(activity: MainActivity) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var text by remember { mutableStateOf(activity.emailRecipient) }
+    ModalBottomSheet(
+        onDismissRequest = { activity.closeSheet() },
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+                .imePadding()
+        ) {
+            Text(
+                "기본 메일주소",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "공유 시 자동으로 채워질 수신 메일주소.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("이메일") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { activity.closeSheet() },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("취소")
+                }
+                Button(
+                    onClick = {
+                        if (activity.applyEmailRecipient(text)) {
+                            activity.closeSheet()
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("저장")
+                }
+            }
+        }
+    }
+}
+
+// =================================================================
+// AlertDialogs (작은 선택 다이얼로그)
+// =================================================================
+
+@Composable
+private fun ModeDialog(activity: MainActivity) {
+    val labels = listOf("자체감정" to MainActivity.MODE_SELF_APPRAISAL, "현지답사" to MainActivity.MODE_FIELD_SURVEY)
+    AlertDialog(
+        onDismissRequest = { activity.closeSheet() },
+        title = { Text("작업 모드", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                labels.forEach { (label, value) ->
+                    RadioRow(
+                        selected = activity.appMode == value,
+                        text = label,
+                        onClick = {
+                            activity.applyMode(value)
+                            activity.closeSheet()
+                        }
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { activity.closeSheet() }) { Text("닫기") }
+        }
+    )
+}
+
+@Composable
+private fun MailAppDialog(activity: MainActivity) {
+    val labels = listOf("Gmail" to MainActivity.MAIL_APP_GMAIL, "Other" to MainActivity.MAIL_APP_OTHER)
+    AlertDialog(
+        onDismissRequest = { activity.closeSheet() },
+        title = { Text("기본 공유 방식", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                labels.forEach { (label, value) ->
+                    RadioRow(
+                        selected = activity.mailAppPref == value,
+                        text = label,
+                        onClick = {
+                            activity.applyMailApp(value)
+                            activity.closeSheet()
+                        }
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { activity.closeSheet() }) { Text("닫기") }
+        }
+    )
+}
+
+@Composable
+private fun RadioRow(selected: Boolean, text: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Spacer(Modifier.width(8.dp))
+        Text(text, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
+private fun ExportFormatDialog(activity: MainActivity) {
+    FormatChoiceDialog(
+        title = "저장 형식 선택",
+        onDismiss = { activity.closeSheet() },
+        onChoose = { format ->
+            activity.closeSheet()
+            activity.startExport(format)
+        }
+    )
+}
+
+@Composable
+private fun ShareFormatDialog(activity: MainActivity, recipient: String) {
+    FormatChoiceDialog(
+        title = "공유 형식 선택",
+        onDismiss = { activity.closeSheet() },
+        onChoose = { format ->
+            activity.closeSheet()
+            activity.startShare(recipient, format)
+        }
+    )
+}
+
+@Composable
+private fun FormatChoiceDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    onChoose: (String) -> Unit
+) {
+    val formats = listOf(
+        "PPTX" to MainActivity.FORMAT_PPTX,
+        "PDF" to MainActivity.FORMAT_PDF,
+        "JPG" to MainActivity.FORMAT_JPG
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                formats.forEach { (label, value) ->
+                    Button(
+                        onClick = { onChoose(value) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Text(label, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        }
+    )
+}
+
+@Composable
+private fun ConfirmClearDialog(activity: MainActivity) {
+    AlertDialog(
+        onDismissRequest = { activity.closeSheet() },
+        title = { Text("전체 삭제", fontWeight = FontWeight.Bold) },
+        text = {
+            Text(
+                "등록된 사진 ${activity.photos.size}장과 앱 내부 파일을 모두 삭제합니다. 되돌릴 수 없습니다.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    activity.applyClearAll()
+                    activity.closeSheet()
+                },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) { Text("삭제", fontWeight = FontWeight.SemiBold) }
+        },
+        dismissButton = {
+            TextButton(onClick = { activity.closeSheet() }) { Text("취소") }
+        }
+    )
+}
+
+@Composable
+private fun ConfirmDeleteDialog(activity: MainActivity, item: MainActivity.PhotoItem) {
+    AlertDialog(
+        onDismissRequest = { activity.closeSheet() },
+        title = { Text(activity.photoTitle(item), fontWeight = FontWeight.Bold) },
+        text = { Text("이 사진을 삭제할까요?") },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    activity.deletePhoto(item)
+                    activity.openSheet = AppSheet.PhotoList // 목록으로 돌아가기
+                },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) { Text("삭제", fontWeight = FontWeight.SemiBold) }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = { activity.openSheet = AppSheet.PhotoList }
+            ) { Text("취소") }
+        }
+    )
+}

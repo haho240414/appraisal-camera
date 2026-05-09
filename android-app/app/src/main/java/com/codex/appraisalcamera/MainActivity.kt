@@ -1,7 +1,6 @@
 package com.codex.appraisalcamera
 
 import android.Manifest
-import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ContentValues
@@ -27,10 +26,6 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.view.WindowManager
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.SeekBar
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -90,12 +85,19 @@ class MainActivity : ComponentActivity() {
     var fieldSurveyor by mutableStateOf("")
     val photos: SnapshotStateList<PhotoItem> = mutableStateListOf()
 
+    // 설정/메일 — Settings 시트가 즉시 반영하도록 mutableStateOf.
+    var emailRecipient by mutableStateOf("")
+    var mailAppPref by mutableStateOf(MAIL_APP_OTHER)
+    var guideAlphaPercent by mutableStateOf(82)
+    var guideScalePercent by mutableStateOf(78)
+
+    /** 현재 열려 있는 시트/다이얼로그. CameraScreen 이 관찰. */
+    var openSheet by mutableStateOf<AppSheet>(AppSheet.None)
+
     // ---- Non-UI state ----
     private var imageCapture: ImageCapture? = null
     private var pendingExportBytes: ByteArray? = null
     private var pendingExportLabel: String = ""
-    private var guideAlphaPercent: Int = 82
-    private var guideScalePercent: Int = 78
 
     // ActivityResult launchers
     private lateinit var pickImageLauncher: ActivityResultLauncher<Array<String>>
@@ -119,6 +121,8 @@ class MainActivity : ComponentActivity() {
         loadPropertyAddress()
         loadFieldSurveyInfo()
         loadGuideSettings()
+        loadEmailRecipient()
+        loadMailApp()
         restoreControlState(savedInstanceState)
 
         setContent {
@@ -410,16 +414,19 @@ class MainActivity : ComponentActivity() {
 
     fun confirmClear() {
         if (photos.isEmpty()) return
-        AlertDialog.Builder(this)
-            .setTitle("전체 삭제")
-            .setMessage("등록된 사진 목록을 모두 삭제할까요?")
-            .setPositiveButton("삭제") { _, _ ->
-                photos.toList().forEach { deleteAppPhotoFile(it) }
-                photos.clear()
-                savePhotos()
-            }
-            .setNegativeButton("취소", null)
-            .show()
+        openSheet = AppSheet.ConfirmClear
+    }
+
+    /** ConfirmClear 시트의 확인 콜백. */
+    fun applyClearAll() {
+        photos.toList().forEach { deleteAppPhotoFile(it) }
+        photos.clear()
+        savePhotos()
+    }
+
+    /** PhotoList 시트에서 개별 사진 삭제 확인 인텐트. */
+    fun confirmDeletePhoto(item: PhotoItem) {
+        openSheet = AppSheet.ConfirmDelete(item)
     }
 
     fun sortedPhotos(): List<PhotoItem> {
@@ -564,41 +571,14 @@ class MainActivity : ComponentActivity() {
         return parts.joinToString(" / ")
     }
 
-    // ---- Dialogs (Java-style AlertDialog; D3 에서 Compose 화 예정) ----
+    // ---- 시트 / 다이얼로그 인텐트 (실제 UI 는 Compose AppSheets) ----
 
     fun showModeDialog() {
-        val labels = arrayOf("자체감정", "현지답사")
-        val values = arrayOf(MODE_SELF_APPRAISAL, MODE_FIELD_SURVEY)
-        val checked = if (isFieldSurveyMode()) 1 else 0
-        AlertDialog.Builder(this)
-            .setTitle("작업 모드")
-            .setSingleChoiceItems(labels, checked) { dialog, which ->
-                appMode = values[which]
-                saveAppMode()
-                Toast.makeText(this, "${labels[which]} 모드로 변경했습니다.", Toast.LENGTH_SHORT).show()
-                dialog.dismiss()
-            }
-            .setNegativeButton("취소", null)
-            .show()
+        openSheet = AppSheet.Mode
     }
 
     fun showAddressDialog() {
-        val input = EditText(this).apply {
-            setSingleLine(true)
-            hint = "물건지 주소"
-            setText(propertyAddress)
-            textSize = 14f
-        }
-        AlertDialog.Builder(this)
-            .setTitle("물건지 주소")
-            .setView(input)
-            .setNegativeButton("취소", null)
-            .setPositiveButton("저장") { _, _ ->
-                propertyAddress = input.text.toString().trim()
-                savePropertyAddress()
-                Toast.makeText(this, "물건지 주소가 저장되었습니다.", Toast.LENGTH_SHORT).show()
-            }
-            .show()
+        openSheet = AppSheet.Address
     }
 
     fun showEmailDialog() {
@@ -606,151 +586,29 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "공유할 사진이 없습니다.", Toast.LENGTH_SHORT).show()
             return
         }
-        val shareMode = getSavedMailApp()
-        val savedRecipient = getSavedEmailRecipient()
+        val shareMode = mailAppPref
+        val savedRecipient = emailRecipient
         if (shareMode == MAIL_APP_OTHER || savedRecipient.isNotEmpty()) {
-            showShareFormatDialog(savedRecipient)
+            openSheet = AppSheet.ShareFormat(savedRecipient)
             return
         }
-        showEmailAddressDialog()
+        openSheet = AppSheet.EmailRecipient
     }
 
-    private fun showEmailAddressDialog() {
-        val input = EditText(this).apply {
-            setSingleLine(true)
-            hint = "기본 수신 메일주소"
-            setText(getSavedEmailRecipient())
-            textSize = 14f
-        }
-        AlertDialog.Builder(this)
-            .setTitle("기본 메일주소")
-            .setView(input)
-            .setNegativeButton("취소", null)
-            .setPositiveButton("저장") { _, _ ->
-                val recipient = input.text.toString().trim()
-                if (!recipient.contains("@")) {
-                    Toast.makeText(this, "메일주소를 확인해주세요.", Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
-                }
-                saveEmailRecipient(recipient)
-                Toast.makeText(this, "기본 메일주소가 저장되었습니다.", Toast.LENGTH_SHORT).show()
-            }
-            .show()
+    fun showEmailAddressSheet() {
+        openSheet = AppSheet.EmailRecipient
+    }
+
+    fun showMailAppSheet() {
+        openSheet = AppSheet.MailApp
     }
 
     fun showGuideSettingsDialog() {
-        // 단순화된 설정 다이얼로그 (Phase D3 에서 Compose 로 재작성).
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dpPx(20), dpPx(16), dpPx(20), dpPx(8))
-        }
-
-        fun label(text: String): TextView = TextView(this).apply {
-            this.text = text
-            textSize = 14f
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, dpPx(12), 0, dpPx(4))
-        }
-
-        content.addView(label("기본 메일주소"))
-        val emailValue = TextView(this).apply {
-            val saved = getSavedEmailRecipient()
-            text = if (saved.isEmpty()) "미설정 (탭하여 설정)" else saved
-            textSize = 13f
-            setOnClickListener { showEmailAddressDialog() }
-        }
-        content.addView(emailValue)
-
-        content.addView(label("기본 공유 방식 (현재: ${mailAppLabel(getSavedMailApp())})"))
-        val mailAppValue = TextView(this).apply {
-            text = "탭하여 변경"
-            textSize = 13f
-            setOnClickListener { showMailAppDialog() }
-        }
-        content.addView(mailAppValue)
-
-        val alphaLabel = label("배경 불투명도 ${guideAlphaPercent}%")
-        content.addView(alphaLabel)
-        val alphaSeek = SeekBar(this).apply {
-            max = 65
-            progress = guideAlphaPercent - 35
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                    guideAlphaPercent = 35 + progress
-                    alphaLabel.text = "배경 불투명도 ${guideAlphaPercent}%"
-                    saveGuideSettings()
-                }
-                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-            })
-        }
-        content.addView(alphaSeek)
-
-        val scaleLabel = label("가이드 크기 ${guideScalePercent}%")
-        content.addView(scaleLabel)
-        val scaleSeek = SeekBar(this).apply {
-            max = 40
-            progress = guideScalePercent - 60
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                    guideScalePercent = 60 + progress
-                    scaleLabel.text = "가이드 크기 ${guideScalePercent}%"
-                    saveGuideSettings()
-                }
-                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-            })
-        }
-        content.addView(scaleSeek)
-
-        AlertDialog.Builder(this)
-            .setTitle("설정")
-            .setView(content)
-            .setNegativeButton("기본값") { _, _ ->
-                guideAlphaPercent = 82
-                guideScalePercent = 78
-                saveGuideSettings()
-            }
-            .setPositiveButton("닫기", null)
-            .show()
+        openSheet = AppSheet.Settings
     }
 
     fun showHelpDialog() {
-        val help = """
-            • 자체감정/현지답사: 작업 모드 전환
-            • 물건지: 사진자료 상단 주소
-            • 채무자/답사자: 현지답사 모드 입력
-            • 저장: PPTX/PDF/JPG 로 사진자료 저장
-            • 공유: PPTX/PDF/JPG 로 메일/공유
-            • 목록: 등록된 사진 보기 / 삭제
-            • 전체삭제: 사진 + 파일 모두 제거
-            • 설정: 메일주소 / 공유앱 / 가이드 투명도/크기
-            • 토지/건물/제시외/기타: 사진 분류
-            • 기호: 분류별 자동 다음 기호
-            • 사진 설명: 비워두면 분류+기호 자동 사용
-            • 촬영: 카메라로 촬영 후 자동 저장
-            • 이미지 선택: 갤러리에서 추가
-        """.trimIndent()
-        AlertDialog.Builder(this)
-            .setTitle("도움말")
-            .setMessage(help)
-            .setPositiveButton("닫기", null)
-            .show()
-    }
-
-    private fun showMailAppDialog() {
-        val labels = arrayOf("Gmail", "Other")
-        val values = arrayOf(MAIL_APP_GMAIL, MAIL_APP_OTHER)
-        val checked = indexOfOrDefault(values, getSavedMailApp(), 0)
-        AlertDialog.Builder(this)
-            .setTitle("기본 공유 방식")
-            .setSingleChoiceItems(labels, checked) { dialog, which ->
-                saveMailApp(values[which])
-                Toast.makeText(this, "${labels[which]}로 설정했습니다.", Toast.LENGTH_SHORT).show()
-                dialog.dismiss()
-            }
-            .setNegativeButton("취소", null)
-            .show()
+        openSheet = AppSheet.Help
     }
 
     fun showPhotoListDialog() {
@@ -758,21 +616,7 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "등록된 사진이 없습니다.", Toast.LENGTH_SHORT).show()
             return
         }
-        val sorted = sortedPhotos()
-        val labels = sorted.map { "${photoTitle(it)} · ${photoMetaText(it)}" }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("등록된 사진 ${sorted.size}장")
-            .setItems(labels) { _, which ->
-                val item = sorted[which]
-                AlertDialog.Builder(this)
-                    .setTitle(photoTitle(item))
-                    .setMessage("이 사진을 삭제할까요?")
-                    .setPositiveButton("삭제") { _, _ -> deletePhoto(item) }
-                    .setNegativeButton("취소", null)
-                    .show()
-            }
-            .setPositiveButton("닫기", null)
-            .show()
+        openSheet = AppSheet.PhotoList
     }
 
     fun showExportFormatDialog() {
@@ -780,21 +624,66 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "저장할 사진이 없습니다.", Toast.LENGTH_SHORT).show()
             return
         }
-        val labels = arrayOf("PPTX", "PDF", "JPG")
-        val formats = arrayOf(FORMAT_PPTX, FORMAT_PDF, FORMAT_JPG)
-        AlertDialog.Builder(this)
-            .setTitle("저장 형식 선택")
-            .setItems(labels) { _, which -> exportOutput(formats[which]) }
-            .show()
+        openSheet = AppSheet.ExportFormat
     }
 
-    private fun showShareFormatDialog(recipient: String) {
-        val labels = arrayOf("PPTX", "PDF", "JPG")
-        val formats = arrayOf(FORMAT_PPTX, FORMAT_PDF, FORMAT_JPG)
-        AlertDialog.Builder(this)
-            .setTitle("공유 형식 선택")
-            .setItems(labels) { _, which -> shareOutput(recipient, formats[which]) }
-            .show()
+    fun closeSheet() {
+        openSheet = AppSheet.None
+    }
+
+    /** 시트 onConfirm 콜백에서 호출. */
+    fun applyAddress(newAddress: String) {
+        propertyAddress = newAddress.trim()
+        savePropertyAddress()
+        Toast.makeText(this, "물건지 주소가 저장되었습니다.", Toast.LENGTH_SHORT).show()
+    }
+
+    fun applyMode(newMode: String) {
+        if (appMode == newMode) return
+        appMode = newMode
+        saveAppMode()
+        val label = if (newMode == MODE_FIELD_SURVEY) "현지답사" else "자체감정"
+        Toast.makeText(this, "$label 모드로 변경했습니다.", Toast.LENGTH_SHORT).show()
+    }
+
+    fun applyEmailRecipient(recipient: String): Boolean {
+        if (!recipient.contains("@")) {
+            Toast.makeText(this, "메일주소를 확인해주세요.", Toast.LENGTH_LONG).show()
+            return false
+        }
+        saveEmailRecipient(recipient.trim())
+        Toast.makeText(this, "기본 메일주소가 저장되었습니다.", Toast.LENGTH_SHORT).show()
+        return true
+    }
+
+    fun applyMailApp(value: String) {
+        saveMailApp(value)
+        val label = if (value == MAIL_APP_GMAIL) "Gmail" else "Other"
+        Toast.makeText(this, "${label}로 설정했습니다.", Toast.LENGTH_SHORT).show()
+    }
+
+    fun applyGuideAlpha(percent: Int) {
+        guideAlphaPercent = percent.coerceIn(35, 100)
+        saveGuideSettings()
+    }
+
+    fun applyGuideScale(percent: Int) {
+        guideScalePercent = percent.coerceIn(60, 100)
+        saveGuideSettings()
+    }
+
+    fun resetGuideDefaults() {
+        guideAlphaPercent = 82
+        guideScalePercent = 78
+        saveGuideSettings()
+    }
+
+    fun startExport(format: String) {
+        exportOutput(format)
+    }
+
+    fun startShare(recipient: String, format: String) {
+        shareOutput(recipient, format)
     }
 
     // ---- Export (background) ----
@@ -1051,8 +940,7 @@ class MainActivity : ComponentActivity() {
         Toast.makeText(this, "${formatLabel(format)} 사진자료를 만드는 중입니다…", Toast.LENGTH_SHORT).show()
         exportInProgress = true
 
-        val mailApp = getSavedMailApp()
-        val otherShare = mailApp == MAIL_APP_OTHER
+        val otherShare = mailAppPref == MAIL_APP_OTHER
 
         exportExecutor.submit {
             val attachmentUris: ArrayList<Uri>
@@ -1335,27 +1223,29 @@ class MainActivity : ComponentActivity() {
         return CATEGORY_LAND
     }
 
-    private fun getSavedEmailRecipient(): String =
-        (prefs().getString(PREF_EMAIL, "") ?: "").trim()
-
-    private fun saveEmailRecipient(recipient: String) {
-        prefs().edit().putString(PREF_EMAIL, recipient.trim()).apply()
+    private fun loadEmailRecipient() {
+        emailRecipient = (prefs().getString(PREF_EMAIL, "") ?: "").trim()
     }
 
-    private fun getSavedMailApp(): String {
+    private fun saveEmailRecipient(recipient: String) {
+        emailRecipient = recipient.trim()
+        prefs().edit().putString(PREF_EMAIL, emailRecipient).apply()
+    }
+
+    private fun loadMailApp() {
         val v = prefs().getString(PREF_MAIL_APP, MAIL_APP_OTHER) ?: MAIL_APP_OTHER
-        if (v == "chooser" || v == "naver") return MAIL_APP_OTHER
-        return v
+        mailAppPref = if (v == "chooser" || v == "naver") MAIL_APP_OTHER else v
     }
 
     private fun saveMailApp(mailApp: String) {
+        mailAppPref = mailApp
         prefs().edit().putString(PREF_MAIL_APP, mailApp).apply()
     }
 
     private fun selectedMailPackage(): String =
-        if (getSavedMailApp() == MAIL_APP_GMAIL) GMAIL_PACKAGE else ""
+        if (mailAppPref == MAIL_APP_GMAIL) GMAIL_PACKAGE else ""
 
-    private fun mailAppLabel(mailApp: String): String =
+    fun mailAppLabel(mailApp: String): String =
         if (mailApp == MAIL_APP_GMAIL) "Gmail" else "Other"
 
     // ---- helpers ----

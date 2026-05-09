@@ -100,6 +100,9 @@ fun CameraScreen(activity: MainActivity) {
             Spacer(Modifier.weight(1f))
             ControlsCard(activity = activity)
         }
+
+        // 시트/다이얼로그 디스패처
+        AppSheets(activity = activity)
     }
 }
 
