@@ -154,15 +154,37 @@ private fun PortraitOverlay(activity: MainActivity, cardAlpha: Float, cardScale:
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Box(modifier = Modifier.widthIn(max = 126.dp).weight(0.9f)) {
-                LeftSidePanel(activity, cardAlpha)
-            }
-            Box(modifier = Modifier.weight(1.4f)) {
-                BottomBar(activity, cardAlpha)
+            Box(modifier = Modifier.weight(1f)) {
+                PortraitBottomGuide(activity, cardAlpha)
             }
             Box(modifier = Modifier.widthIn(max = 106.dp).weight(0.8f)) {
                 RightSidePanel(activity, cardAlpha)
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PortraitBottomGuide(activity: MainActivity, cardAlpha: Float) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(2.dp, MaterialTheme.shapes.large),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = cardAlpha)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (activity.isFieldSurveyMode()) {
+                FieldSurveyInputs(activity)
+            } else {
+                HorizontalCategoryChips(activity)
+                SymbolPicker(activity)
+            }
+            MemoField(activity)
         }
     }
 }
@@ -235,6 +257,49 @@ private fun VerticalCategoryTabs(activity: MainActivity) {
                         fontWeight = FontWeight.SemiBold,
                         color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
                         else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HorizontalCategoryChips(activity: MainActivity) {
+    val items = listOf(
+        MainActivity.CATEGORY_LAND to "토지",
+        MainActivity.CATEGORY_BUILDING to "건물",
+        MainActivity.CATEGORY_EXTRA to "제시외",
+        MainActivity.CATEGORY_CUSTOM to "기타"
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        items.forEach { (key, label) ->
+            val selected = activity.currentCategory == key
+            Surface(
+                onClick = {
+                    if (activity.currentCategory != key) {
+                        activity.currentCategory = key
+                        activity.currentSymbol = ""
+                        activity.currentBuildingSub = ""
+                        activity.saveControlState()
+                    }
+                },
+                modifier = Modifier.weight(1f).height(32.dp),
+                shape = MaterialTheme.shapes.small,
+                color = if (selected) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        label,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
                     )
                 }
             }
@@ -360,7 +425,7 @@ private fun LandscapeOverlay(activity: MainActivity, cardAlpha: Float, cardScale
 
         Box(
             modifier = Modifier
-                .widthIn(max = 330.dp)
+                .widthIn(max = 188.dp)
                 .fillMaxHeight()
                 .padding(end = 6.dp, top = 8.dp, bottom = 8.dp)
                 .graphicsLayer {
@@ -370,7 +435,7 @@ private fun LandscapeOverlay(activity: MainActivity, cardAlpha: Float, cardScale
                 }
                 .verticalScroll(rememberScrollState())
         ) {
-            ControlsCard(activity = activity, cardAlpha = cardAlpha)
+            NarrowControlsCard(activity = activity, cardAlpha = cardAlpha)
         }
     }
 }
@@ -611,6 +676,44 @@ private fun ControlsCard(activity: MainActivity, cardAlpha: Float = 0.97f) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun NarrowControlsCard(activity: MainActivity, cardAlpha: Float = 0.97f) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(2.dp, MaterialTheme.shapes.large),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = cardAlpha)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (activity.isFieldSurveyMode()) {
+                FieldSurveyInputs(activity)
+            } else {
+                VerticalCategoryTabs(activity)
+                CompactSymbolPicker(activity)
+            }
+            MemoField(activity)
+            CaptureFab(activity, size = 58.dp)
+            OutlinedButton(
+                onClick = { activity.pickImage() },
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.small,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 5.dp)
+            ) {
+                Text("이미지", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+            PhotoCountText(activity)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 private fun CategoryTabs(activity: MainActivity) {
     val labels = listOf(
         MainActivity.CATEGORY_LAND to "토지",
@@ -711,6 +814,96 @@ private fun SymbolPicker(activity: MainActivity) {
                     Text(
                         if (activity.currentBuildingSub.isEmpty()) "없음" else activity.currentBuildingSub,
                         fontSize = 14.sp
+                    )
+                }
+                DropdownMenu(
+                    expanded = subMenuExpanded,
+                    onDismissRequest = { subMenuExpanded = false }
+                ) {
+                    MainActivity.BUILDING_SUB_SYMBOLS.forEach { sub ->
+                        DropdownMenuItem(
+                            text = { Text(sub) },
+                            onClick = {
+                                activity.currentBuildingSub = if (sub == "없음") "" else sub
+                                activity.saveControlState()
+                                subMenuExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactSymbolPicker(activity: MainActivity) {
+    if (activity.currentCategory == MainActivity.CATEGORY_CUSTOM) {
+        OutlinedTextField(
+            value = activity.currentSymbol,
+            onValueChange = {
+                activity.currentSymbol = it.trim()
+                activity.saveControlState()
+            },
+            label = { Text("기타사항") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        return
+    }
+
+    val symbols = activity.symbolsForCategory(activity.currentCategory).toList()
+    val displayLabel = if (activity.currentSymbol.isEmpty()) {
+        val next = activity.nextSymbol(activity.currentCategory)
+        "${activity.categoryLabel(activity.currentCategory)} ${next.base}"
+    } else {
+        "${activity.categoryLabel(activity.currentCategory)} ${activity.currentSymbol}"
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        var symbolMenuExpanded by remember { mutableStateOf(false) }
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { symbolMenuExpanded = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.small,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 5.dp)
+            ) {
+                Text(displayLabel, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            }
+            DropdownMenu(
+                expanded = symbolMenuExpanded,
+                onDismissRequest = { symbolMenuExpanded = false }
+            ) {
+                symbols.forEach { sym ->
+                    DropdownMenuItem(
+                        text = { Text("${activity.categoryLabel(activity.currentCategory)} 기호 $sym") },
+                        onClick = {
+                            activity.currentSymbol = sym
+                            activity.saveControlState()
+                            symbolMenuExpanded = false
+                        }
+                    )
+                }
+            }
+        }
+
+        if (activity.currentCategory == MainActivity.CATEGORY_BUILDING) {
+            var subMenuExpanded by remember { mutableStateOf(false) }
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = { subMenuExpanded = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.small,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 5.dp)
+                ) {
+                    Text(
+                        if (activity.currentBuildingSub.isEmpty()) "하위기호 없음" else activity.currentBuildingSub,
+                        fontSize = 12.sp,
+                        maxLines = 1
                     )
                 }
                 DropdownMenu(
