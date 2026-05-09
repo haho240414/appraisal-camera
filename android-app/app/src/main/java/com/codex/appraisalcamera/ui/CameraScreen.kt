@@ -72,6 +72,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -121,9 +122,14 @@ fun CameraScreen(activity: MainActivity) {
 }
 
 /**
- * 세로 모드: 상단 바 + 하단 컨트롤 카드 (카드는 사용자 설정대로 scale/alpha 적용).
- * 카드의 transformOrigin 을 bottom-center 로 둬서, scale 을 줄여도 화면 아래쪽에 붙어 있게 한다.
+ * 세로 모드: 상단 바 + 좌/우 사이드 패널 + 하단 메모/촬영 영역.
+ * 가운데 컬럼은 카메라 미리보기가 그대로 보임.
+ *  - 좌측 패널: 카테고리 탭(세로) + 기호 선택
+ *  - 우측 패널: 사진 수 + 촬영 FAB + 이미지 선택
+ *  - 하단 영역: 메모(현지답사 모드 시 채무자/답사자)
+ * 사이드 패널에 사용자 설정의 alpha/scale 적용.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PortraitOverlay(activity: MainActivity, cardAlpha: Float, cardScale: Float) {
     Column(
@@ -132,17 +138,218 @@ private fun PortraitOverlay(activity: MainActivity, cardAlpha: Float, cardScale:
             .windowInsetsPadding(WindowInsets.systemBars)
     ) {
         TopBar(activity = activity)
-        Spacer(Modifier.weight(1f))
+
+        // 가운데 영역: 좌측 사이드 + 카메라 표시 영역(투명 spacer) + 우측 사이드
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 좌측 패널 — 카테고리 + 기호
+            Box(
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .widthIn(max = 130.dp)
+                    .graphicsLayer {
+                        scaleX = cardScale
+                        scaleY = cardScale
+                        transformOrigin = TransformOrigin(0f, 0.5f)
+                    }
+            ) {
+                LeftSidePanel(activity, cardAlpha)
+            }
+
+            // 카메라가 통과해서 보이는 영역
+            Spacer(Modifier.weight(1f))
+
+            // 우측 패널 — 촬영 / 이미지 선택
+            Box(
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .widthIn(max = 110.dp)
+                    .graphicsLayer {
+                        scaleX = cardScale
+                        scaleY = cardScale
+                        transformOrigin = TransformOrigin(1f, 0.5f)
+                    }
+            ) {
+                RightSidePanel(activity, cardAlpha)
+            }
+        }
+
+        // 하단 메모/현지답사 입력 영역 (얇은 한 줄)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp)
                 .graphicsLayer {
                     scaleX = cardScale
                     scaleY = cardScale
                     transformOrigin = TransformOrigin(0.5f, 1f)
                 }
         ) {
-            ControlsCard(activity = activity, cardAlpha = cardAlpha)
+            BottomBar(activity, cardAlpha)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LeftSidePanel(activity: MainActivity, cardAlpha: Float) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(2.dp, MaterialTheme.shapes.large),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = cardAlpha)
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (!activity.isFieldSurveyMode()) {
+                VerticalCategoryTabs(activity)
+                SymbolPicker(activity)
+            } else {
+                Text(
+                    "현지답사",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    "사진 ${activity.photos.size}장",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VerticalCategoryTabs(activity: MainActivity) {
+    val items = listOf(
+        MainActivity.CATEGORY_LAND to "토지",
+        MainActivity.CATEGORY_BUILDING to "건물",
+        MainActivity.CATEGORY_EXTRA to "제시외",
+        MainActivity.CATEGORY_CUSTOM to "기타"
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        items.forEach { (key, label) ->
+            val selected = activity.currentCategory == key
+            Surface(
+                onClick = {
+                    if (activity.currentCategory != key) {
+                        activity.currentCategory = key
+                        activity.currentSymbol = ""
+                        activity.currentBuildingSub = ""
+                        activity.saveControlState()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(36.dp),
+                shape = MaterialTheme.shapes.small,
+                color = if (selected) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        label,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RightSidePanel(activity: MainActivity, cardAlpha: Float) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(2.dp, MaterialTheme.shapes.large),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = cardAlpha)
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // 사진 수
+            val count = activity.photos.size
+            Text(
+                if (count == 0) "0장" else "${count}장",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            // 큰 원형 촬영 FAB
+            CaptureFab(activity, size = 64.dp)
+
+            // 이미지 선택
+            OutlinedButton(
+                onClick = { activity.pickImage() },
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.small,
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
+            ) {
+                Text("이미지", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CaptureFab(activity: MainActivity, size: Dp) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.92f else 1f,
+        animationSpec = spring(),
+        label = "fabScale"
+    )
+    Surface(
+        onClick = { activity.capturePhoto() },
+        interactionSource = interactionSource,
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primary,
+        shadowElevation = 6.dp,
+        modifier = Modifier.size(size).scale(scale)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(size * 0.42f)
+            ) {}
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BottomBar(activity: MainActivity, cardAlpha: Float) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(2.dp, MaterialTheme.shapes.large),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = cardAlpha)
+    ) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (activity.isFieldSurveyMode()) {
+                FieldSurveyInputs(activity)
+            }
+            MemoField(activity)
         }
     }
 }

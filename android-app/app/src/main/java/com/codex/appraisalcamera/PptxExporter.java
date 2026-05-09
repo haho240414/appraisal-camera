@@ -34,17 +34,39 @@ final class PptxExporter {
     private PptxExporter() {
     }
 
-    static byte[] create(Context context, List<PhotoData> photos, String headerText) throws IOException {
+    /**
+     * Returns: 생성된 PPTX 바이트.
+     * 도중에 한 사진이라도 실패하면 그 사진은 SKIP 하고 나머지로 PPTX 를 만든다.
+     * 모두 실패하면 IOException.
+     */
+    static Result createWithStats(Context context, List<PhotoData> photos, String headerText) throws IOException {
+        // 1) 사진을 미리 모두 디코드 — 실패한 것은 skip.
+        ArrayList<DecodedPhoto> decoded = new ArrayList<>();
+        int skipped = 0;
+        for (PhotoData photo : photos) {
+            try {
+                byte[] jpegBytes = readJpeg(context, photo);
+                decoded.add(new DecodedPhoto(photo, jpegBytes));
+            } catch (Throwable t) {
+                skipped++;
+            }
+        }
+        if (decoded.isEmpty()) {
+            throw new IOException("디코드할 수 있는 사진이 없습니다 (skipped=" + skipped + ")");
+        }
+
+        // 2) 디코드 성공한 사진만으로 슬라이드 구성.
         ArrayList<SlideData> slides = new ArrayList<>();
-        for (int i = 0; i < photos.size(); i += 2) {
+        for (int i = 0; i < decoded.size(); i += 2) {
             SlideData slide = new SlideData();
-            slide.items.add(new SlideItem(photos.get(i), true));
-            if (i + 1 < photos.size()) {
-                slide.items.add(new SlideItem(photos.get(i + 1), false));
+            slide.items.add(new SlideItem(decoded.get(i).photo, true));
+            if (i + 1 < decoded.size()) {
+                slide.items.add(new SlideItem(decoded.get(i + 1).photo, false));
             }
             slides.add(slide);
         }
 
+        // 3) PPTX zip 작성.
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
             write(zip, "[Content_Types].xml", contentTypes(slides.size()));
@@ -60,6 +82,7 @@ final class PptxExporter {
             write(zip, "ppt/theme/theme1.xml", themeXml());
 
             int imageIndex = 1;
+            int decodedIndex = 0;
             for (int i = 0; i < slides.size(); i++) {
                 int slideNumber = i + 1;
                 SlideData slide = slides.get(i);
@@ -67,14 +90,35 @@ final class PptxExporter {
                     item.relationshipId = "rId" + (slide.imageRels.size() + 2);
                     item.imageName = "image" + imageIndex + ".jpg";
                     slide.imageRels.add(item);
-                    writeBytes(zip, "ppt/media/" + item.imageName, readJpeg(context, item.photo));
+                    writeBytes(zip, "ppt/media/" + item.imageName, decoded.get(decodedIndex).jpegBytes);
                     imageIndex++;
+                    decodedIndex++;
                 }
                 write(zip, "ppt/slides/slide" + slideNumber + ".xml", slideXml(slide, slideNumber, headerText));
                 write(zip, "ppt/slides/_rels/slide" + slideNumber + ".xml.rels", slideRels(slide));
             }
         }
-        return bytes.toByteArray();
+        return new Result(bytes.toByteArray(), skipped);
+    }
+
+    /** Backwards-compatible wrapper. */
+    static byte[] create(Context context, List<PhotoData> photos, String headerText) throws IOException {
+        return createWithStats(context, photos, headerText).bytes;
+    }
+
+    static final class Result {
+        final byte[] bytes;
+        final int skipped;
+        Result(byte[] bytes, int skipped) { this.bytes = bytes; this.skipped = skipped; }
+    }
+
+    private static final class DecodedPhoto {
+        final PhotoData photo;
+        final byte[] jpegBytes;
+        DecodedPhoto(PhotoData photo, byte[] jpegBytes) {
+            this.photo = photo;
+            this.jpegBytes = jpegBytes;
+        }
     }
 
     private static byte[] readJpeg(Context context, PhotoData photo) throws IOException {

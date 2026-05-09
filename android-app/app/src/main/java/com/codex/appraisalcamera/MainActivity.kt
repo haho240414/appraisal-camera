@@ -222,7 +222,9 @@ class MainActivity : ComponentActivity() {
                 val preview = Preview.Builder().build()
                 val capture = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                    .setJpegQuality(75)
+                    // 일반 화질 — 사진자료용으로 충분하고 파일도 작아 PPTX/PDF 가
+                    // 더 가벼워진다. 후처리 압축이 디바이스마다 실패하던 이슈도 해결.
+                    .setJpegQuality(60)
                     .build()
                 preview.surfaceProvider = previewView.surfaceProvider
 
@@ -264,7 +266,8 @@ class MainActivity : ComponentActivity() {
         capture.takePicture(options, ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                 val savedUri = outputFileResults.savedUri ?: Uri.fromFile(outputFile)
-                compressSavedImage(savedUri, capturedAt)
+                // 후처리 압축 제거 — JpegQuality 60 으로 직접 저장. 디바이스마다
+                // 실패하던 "사진 용량 줄이기 실패" 토스트도 사라진다.
                 addPhoto(savedUri.toString(), capturedAt, false)
             }
 
@@ -753,8 +756,9 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * 사진 URI 가 실제로 디코드 가능한지 사전 체크.
-     * file:// 는 파일 존재 + 크기, content:// 는 InputStream 으로 옵션 디코드 시도.
+     * 사진 URI 가 최소한 열릴 수 있는지 가벼운 체크.
+     * 너무 엄격하면 디바이스마다 거짓 양성으로 사진이 모두 누락될 수 있어
+     * file:// 는 파일 존재 + 크기만, content:// 는 InputStream open 만 검사.
      */
     private fun canReadPhoto(uri: String): Boolean {
         return try {
@@ -762,14 +766,11 @@ class MainActivity : ComponentActivity() {
             if (parsed.scheme == "file") {
                 val path = parsed.path ?: return false
                 val file = File(path)
-                if (!file.exists() || file.length() == 0L) return false
+                return file.exists() && file.length() > 0L
             }
-            // 1px 사이즈로 헤더만 디코드해서 손상 여부 확인.
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            contentResolver.openInputStream(parsed)?.use { input ->
-                BitmapFactory.decodeStream(input, null, opts)
-            }
-            opts.outWidth > 0 && opts.outHeight > 0
+            // content:// : 스트림이 한 번 열리면 OK.
+            contentResolver.openInputStream(parsed)?.use { it.read() }
+            true
         } catch (_: Exception) {
             false
         }
@@ -778,23 +779,24 @@ class MainActivity : ComponentActivity() {
     @Throws(IOException::class)
     private fun createPptxBytes(): ByteArray {
         val exportPhotos = ArrayList<PptxExporter.PhotoData>()
-        var skipped = 0
         for (photo in sortedPhotos()) {
-            if (!canReadPhoto(photo.uri)) {
-                skipped++
-                continue
-            }
-            exportPhotos.add(PptxExporter.PhotoData(Uri.parse(photo.uri), photoCaption(photo), displayPhotoStamp(photo)))
-        }
-        if (skipped > 0) {
-            runOnUiSafely {
-                Toast.makeText(this, "${skipped}장 누락 (파일 손상 또는 삭제됨)", Toast.LENGTH_LONG).show()
-            }
+            // canReadPhoto 는 가벼운 1차 필터 — 명백히 깨진 것만 거른다.
+            // PptxExporter 내부에서 디코드 실패한 사진도 자동 skip.
+            if (!canReadPhoto(photo.uri)) continue
+            exportPhotos.add(
+                PptxExporter.PhotoData(Uri.parse(photo.uri), photoCaption(photo), displayPhotoStamp(photo))
+            )
         }
         if (exportPhotos.isEmpty()) {
             throw IOException("저장할 수 있는 사진이 없습니다")
         }
-        return PptxExporter.create(this, exportPhotos, documentHeaderText())
+        val result = PptxExporter.createWithStats(this, exportPhotos, documentHeaderText())
+        if (result.skipped > 0) {
+            runOnUiSafely {
+                Toast.makeText(this, "${result.skipped}장 누락 (디코드 실패)", Toast.LENGTH_LONG).show()
+            }
+        }
+        return result.bytes
     }
 
     @Throws(IOException::class)
