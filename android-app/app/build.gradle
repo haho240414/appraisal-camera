@@ -64,4 +64,8 @@ dependencies {
     implementation "androidx.compose.ui:ui-tooling-preview"
     implementation "androidx.compose.material3:material3"
     debugImplementation "androidx.compose.ui:ui-tooling"
+
+    // Coil — 사진 목록 시트의 비동기 썸네일 로딩.
+    // file:// 와 content:// URI 모두 지원, 자동 메모리/디스크 캐싱.
+    implementation "io.coil-kt:coil-compose:2.7.0"
 }

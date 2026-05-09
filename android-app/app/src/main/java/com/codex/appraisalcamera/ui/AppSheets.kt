@@ -43,9 +43,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.codex.appraisalcamera.AppSheet
 import com.codex.appraisalcamera.MainActivity
 
@@ -141,8 +145,9 @@ private fun PhotoCard(activity: MainActivity, photo: MainActivity.PhotoItem) {
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 썸네일 — Coil 미설치이므로 일단 회색 박스 + 아이콘 텍스트.
-            // (D4 에서 Coil 추가하거나 Glide 로 썸네일 표시)
+            // 썸네일 — Coil 비동기 로딩, file:// / content:// 모두 지원.
+            // 로딩 중에는 회색 박스 + 기호 텍스트가 placeholder 로 보였다가
+            // 비트맵이 디코드되면 자연스럽게 페이드인.
             Box(
                 modifier = Modifier
                     .size(56.dp)
@@ -154,7 +159,16 @@ private fun PhotoCard(activity: MainActivity, photo: MainActivity.PhotoItem) {
                     text = photo.symbol.take(3),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(photo.uri)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = activity.photoTitle(photo),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(56.dp).clip(MaterialTheme.shapes.small)
                 )
             }
             Spacer(Modifier.width(12.dp))
