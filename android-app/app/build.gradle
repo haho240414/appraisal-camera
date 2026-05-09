@@ -1,5 +1,7 @@
 plugins {
     id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+    id "org.jetbrains.kotlin.plugin.compose"
 }
 
 android {
@@ -23,6 +25,14 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    buildFeatures {
+        compose true
+    }
+
     // ABI별 분리 빌드 + 호환을 위한 universal APK 동시 생성.
     // 워크플로는 universal APK(app-debug.apk)를 그대로 사용하므로 회귀 0.
     splits {
@@ -43,4 +53,15 @@ dependencies {
     implementation "androidx.concurrent:concurrent-futures:1.2.0"
     implementation "androidx.core:core:1.15.0"
     implementation "androidx.lifecycle:lifecycle-runtime:2.8.7"
+
+    // Compose foundation. BOM 으로 버전 동기화.
+    // Phase D1 은 인프라만 도입; 실제 setContent 사용은 D2 부터.
+    def composeBom = platform("androidx.compose:compose-bom:2024.10.01")
+    implementation composeBom
+    implementation "androidx.activity:activity-compose:1.9.3"
+    implementation "androidx.compose.ui:ui"
+    implementation "androidx.compose.ui:ui-graphics"
+    implementation "androidx.compose.ui:ui-tooling-preview"
+    implementation "androidx.compose.material3:material3"
+    debugImplementation "androidx.compose.ui:ui-tooling"
 }
