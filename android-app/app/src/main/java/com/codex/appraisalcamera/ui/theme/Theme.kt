@@ -1,16 +1,19 @@
 package com.codex.appraisalcamera.ui.theme
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /**
- * AppraisalCameraTheme — Toss/카카오뱅크 풍 light Material 3 테마.
+ * AppraisalCameraTheme — Toss/카카오뱅크 풍 Material 3 테마.
  *
- * Phase D1 단계에서는 light scheme 만 정의. Dark scheme 은 D4 polish 단계.
+ * 라이트/다크 모두 지원. 시스템 설정에 따라 자동 전환.
  *
  * Toss 디자인 특징:
  *  - 그림자 약함 (elevation 1~2dp 위주, 큰 카드만 4~6dp)
@@ -51,6 +54,48 @@ private val LightColors = lightColorScheme(
     onErrorContainer = TossRed600
 )
 
+// 다크 팔레트 (Toss 풍): 진회색 surface + 같은 Toss Blue primary.
+private val DarkSurface = Color(0xFF1F2329)
+private val DarkSurfaceVariant = Color(0xFF2D333B)
+private val DarkSurfaceContainer = Color(0xFF262A30)
+private val DarkSurfaceContainerHigh = Color(0xFF2D333B)
+private val DarkSurfaceContainerHighest = Color(0xFF333D4B)
+private val DarkOutline = Color(0xFF333D4B)
+
+private val DarkColors = darkColorScheme(
+    primary = TossBlue500,
+    onPrimary = White,
+    primaryContainer = TossBlue700,
+    onPrimaryContainer = TossBlue50,
+
+    secondary = TossGreen500,
+    onSecondary = White,
+    secondaryContainer = TossGreen600,
+    onSecondaryContainer = TossGreen100,
+
+    tertiary = Gray400,
+    onTertiary = Gray900,
+
+    background = Gray900,
+    onBackground = Gray100,
+
+    surface = DarkSurface,
+    onSurface = Gray100,
+    surfaceVariant = DarkSurfaceVariant,
+    onSurfaceVariant = Gray400,
+    surfaceContainer = DarkSurfaceContainer,
+    surfaceContainerHigh = DarkSurfaceContainerHigh,
+    surfaceContainerHighest = DarkSurfaceContainerHighest,
+
+    outline = DarkOutline,
+    outlineVariant = DarkSurfaceVariant,
+
+    error = TossRed500,
+    onError = White,
+    errorContainer = TossRed600,
+    onErrorContainer = TossRed100
+)
+
 private val AppShapes = Shapes(
     extraSmall = RoundedCornerShape(6.dp),
     small = RoundedCornerShape(8.dp),
@@ -61,10 +106,12 @@ private val AppShapes = Shapes(
 
 @Composable
 fun AppraisalCameraTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
+    val colors = if (darkTheme) DarkColors else LightColors
     MaterialTheme(
-        colorScheme = LightColors,
+        colorScheme = colors,
         typography = AppTypography,
         shapes = AppShapes,
         content = content

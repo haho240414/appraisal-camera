@@ -25,8 +25,10 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -73,6 +75,7 @@ fun AppSheets(activity: MainActivity) {
         is AppSheet.ShareFormat -> ShareFormatDialog(activity, sheet.recipient)
         AppSheet.ConfirmClear -> ConfirmClearDialog(activity)
         is AppSheet.ConfirmDelete -> ConfirmDeleteDialog(activity, sheet.photo)
+        is AppSheet.ExportProgress -> ExportProgressSheet(sheet.format, sheet.current, sheet.total)
     }
 }
 
@@ -125,7 +128,9 @@ private fun PhotoListSheet(activity: MainActivity) {
                 modifier = Modifier.heightIn(max = 600.dp)
             ) {
                 items(sorted, key = { it.id }) { photo ->
-                    PhotoCard(activity, photo)
+                    Box(modifier = Modifier.animateItem()) {
+                        PhotoCard(activity, photo)
+                    }
                 }
             }
         }
@@ -675,6 +680,59 @@ private fun ConfirmClearDialog(activity: MainActivity) {
             TextButton(onClick = { activity.closeSheet() }) { Text("취소") }
         }
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ExportProgressSheet(format: String, current: Int, total: Int) {
+    // 사용자가 작업 중에 swipe 로 닫지 못하게 막는 modal sheet.
+    // (취소 버튼은 D5 에서 추가 — Future cancel 이 필요)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val label = when (format) {
+        MainActivity.FORMAT_PDF -> "PDF"
+        MainActivity.FORMAT_JPG -> "JPG"
+        else -> "PPTX"
+    }
+    ModalBottomSheet(
+        onDismissRequest = { /* 취소 불가 */ },
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+                .padding(bottom = 12.dp)
+        ) {
+            Text(
+                "$label 사진자료 만드는 중",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (total > 0) "$current / $total 페이지" else "준비 중…",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(20.dp))
+            if (total > 0) {
+                LinearProgressIndicator(
+                    progress = { (current.toFloat() / total).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(8.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().height(8.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            }
+        }
+    }
 }
 
 @Composable

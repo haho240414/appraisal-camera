@@ -43,11 +43,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -455,21 +460,31 @@ private fun MemoField(activity: MainActivity) {
 
 @Composable
 private fun CaptureRow(activity: MainActivity) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.92f else 1f,
+        animationSpec = spring(),
+        label = "fabScale"
+    )
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 큰 원형 촬영 FAB
+        // 큰 원형 촬영 FAB — press 시 살짝 줄어드는 spring 애니메이션.
         Surface(
             onClick = { activity.capturePhoto() },
+            interactionSource = interactionSource,
             shape = CircleShape,
             color = MaterialTheme.colorScheme.primary,
             shadowElevation = 6.dp,
-            modifier = Modifier.size(64.dp)
+            modifier = Modifier
+                .size(64.dp)
+                .scale(scale)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                // 안쪽 원 — 셔터 느낌
                 Surface(
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.onPrimary,
@@ -478,7 +493,6 @@ private fun CaptureRow(activity: MainActivity) {
             }
         }
 
-        // 보조: 이미지 선택
         OutlinedButton(
             onClick = { activity.pickImage() },
             modifier = Modifier
@@ -493,8 +507,9 @@ private fun CaptureRow(activity: MainActivity) {
 
 @Composable
 private fun PhotoCountText(activity: MainActivity) {
+    val count = activity.photos.size
     Text(
-        text = "등록된 사진 ${activity.photos.size}장",
+        text = if (count == 0) "촬영하거나 이미지를 선택해 주세요" else "등록된 사진 ${count}장",
         modifier = Modifier.fillMaxWidth(),
         textAlign = TextAlign.Center,
         fontSize = 12.sp,

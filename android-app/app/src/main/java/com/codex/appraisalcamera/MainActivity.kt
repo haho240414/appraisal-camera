@@ -693,23 +693,35 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "이미 사진자료를 만드는 중입니다.", Toast.LENGTH_SHORT).show()
             return
         }
-        Toast.makeText(this, "${formatLabel(format)} 사진자료를 만드는 중입니다…", Toast.LENGTH_SHORT).show()
+        val totalPhotos = photos.size
         exportInProgress = true
+        // 진행 시트를 즉시 띄움. JPG/PDF 는 페이지마다 갱신, PPTX 는 indeterminate(0/0).
+        openSheet = AppSheet.ExportProgress(format = format, current = 0, total = totalPhotos)
 
         exportExecutor.submit {
             try {
                 if (format == FORMAT_JPG) {
-                    val jpgFiles = createJpgFiles()
+                    val jpgFiles = createJpgFiles { done, total ->
+                        runOnUiSafely { openSheet = AppSheet.ExportProgress(format, done, total) }
+                    }
                     writePublicFiles(jpgFiles)
                     runOnUiSafely {
                         exportInProgress = false
+                        closeSheet()
                         Toast.makeText(this, "JPG 사진자료를 저장했습니다.", Toast.LENGTH_LONG).show()
                     }
                     return@submit
                 }
-                val bytes = createOutputBytes(format)
+                val bytes = if (format == FORMAT_PDF) {
+                    createPdfBytes { done, total ->
+                        runOnUiSafely { openSheet = AppSheet.ExportProgress(format, done, total) }
+                    }
+                } else {
+                    createPptxBytes()
+                }
                 runOnUiSafely {
                     exportInProgress = false
+                    closeSheet()
                     pendingExportBytes = bytes
                     pendingExportLabel = formatLabel(format)
                     val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
@@ -719,10 +731,15 @@ class MainActivity : ComponentActivity() {
                     }
                     createOutputLauncher.launch(intent)
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 runOnUiSafely {
                     exportInProgress = false
-                    Toast.makeText(this, "${formatLabel(format)} 파일을 만들 수 없습니다.", Toast.LENGTH_LONG).show()
+                    closeSheet()
+                    Toast.makeText(
+                        this,
+                        "${formatLabel(format)} 파일을 만들 수 없습니다: ${e.message ?: "알 수 없는 오류"}",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }
@@ -735,31 +752,67 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Throws(IOException::class)
-    private fun createOutputBytes(format: String): ByteArray =
-        if (format == FORMAT_PDF) createPdfBytes() else createPptxBytes()
+    /**
+     * 사진 URI 가 실제로 디코드 가능한지 사전 체크.
+     * file:// 는 파일 존재 + 크기, content:// 는 InputStream 으로 옵션 디코드 시도.
+     */
+    private fun canReadPhoto(uri: String): Boolean {
+        return try {
+            val parsed = Uri.parse(uri)
+            if (parsed.scheme == "file") {
+                val path = parsed.path ?: return false
+                val file = File(path)
+                if (!file.exists() || file.length() == 0L) return false
+            }
+            // 1px 사이즈로 헤더만 디코드해서 손상 여부 확인.
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(parsed)?.use { input ->
+                BitmapFactory.decodeStream(input, null, opts)
+            }
+            opts.outWidth > 0 && opts.outHeight > 0
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     @Throws(IOException::class)
     private fun createPptxBytes(): ByteArray {
         val exportPhotos = ArrayList<PptxExporter.PhotoData>()
+        var skipped = 0
         for (photo in sortedPhotos()) {
+            if (!canReadPhoto(photo.uri)) {
+                skipped++
+                continue
+            }
             exportPhotos.add(PptxExporter.PhotoData(Uri.parse(photo.uri), photoCaption(photo), displayPhotoStamp(photo)))
+        }
+        if (skipped > 0) {
+            runOnUiSafely {
+                Toast.makeText(this, "${skipped}장 누락 (파일 손상 또는 삭제됨)", Toast.LENGTH_LONG).show()
+            }
+        }
+        if (exportPhotos.isEmpty()) {
+            throw IOException("저장할 수 있는 사진이 없습니다")
         }
         return PptxExporter.create(this, exportPhotos, documentHeaderText())
     }
 
     @Throws(IOException::class)
-    private fun createPdfBytes(): ByteArray {
-        val sorted = sortedPhotos()
+    private fun createPdfBytes(onProgress: (Int, Int) -> Unit = { _, _ -> }): ByteArray {
+        val sorted = sortedPhotos().filter { canReadPhoto(it.uri) }
+        if (sorted.isEmpty()) throw IOException("저장할 수 있는 사진이 없습니다")
+        val totalPages = (sorted.size + 1) / 2
         val document = PdfDocument()
         val pageWidth = 595
         val pageHeight = 842
         try {
             var i = 0
             while (i < sorted.size) {
-                val info = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, (i / 2) + 1).create()
+                val pageNumber = (i / 2) + 1
+                onProgress(pageNumber, totalPages)
+                val info = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
                 val page = document.startPage(info)
-                drawOutputPage(page.canvas, pageWidth, pageHeight, sorted, i, (i / 2) + 1)
+                drawOutputPage(page.canvas, pageWidth, pageHeight, sorted, i, pageNumber)
                 document.finishPage(page)
                 i += 2
             }
@@ -772,20 +825,24 @@ class MainActivity : ComponentActivity() {
     }
 
     @Throws(IOException::class)
-    private fun createJpgFiles(): ArrayList<ExportFile> {
-        val sorted = sortedPhotos()
+    private fun createJpgFiles(onProgress: (Int, Int) -> Unit = { _, _ -> }): ArrayList<ExportFile> {
+        val sorted = sortedPhotos().filter { canReadPhoto(it.uri) }
+        if (sorted.isEmpty()) throw IOException("저장할 수 있는 사진이 없습니다")
+        val totalPages = (sorted.size + 1) / 2
         val files = ArrayList<ExportFile>()
         val pageWidth = 1240
         val pageHeight = 1754
         var i = 0
         while (i < sorted.size) {
+            val pageNumber = (i / 2) + 1
+            onProgress(pageNumber, totalPages)
             val bitmap = Bitmap.createBitmap(pageWidth, pageHeight, Bitmap.Config.ARGB_8888)
             try {
                 val canvas = Canvas(bitmap)
-                drawOutputPage(canvas, pageWidth, pageHeight, sorted, i, (i / 2) + 1)
+                drawOutputPage(canvas, pageWidth, pageHeight, sorted, i, pageNumber)
                 val output = ByteArrayOutputStream()
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output)
-                files.add(ExportFile(pageJpgFileName((i / 2) + 1), JPG_MIME, output.toByteArray()))
+                files.add(ExportFile(pageJpgFileName(pageNumber), JPG_MIME, output.toByteArray()))
             } finally {
                 bitmap.recycle()
             }
@@ -937,8 +994,8 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "이미 사진자료를 만드는 중입니다.", Toast.LENGTH_SHORT).show()
             return
         }
-        Toast.makeText(this, "${formatLabel(format)} 사진자료를 만드는 중입니다…", Toast.LENGTH_SHORT).show()
         exportInProgress = true
+        openSheet = AppSheet.ExportProgress(format = format, current = 0, total = photos.size)
 
         val otherShare = mailAppPref == MAIL_APP_OTHER
 
@@ -946,22 +1003,37 @@ class MainActivity : ComponentActivity() {
             val attachmentUris: ArrayList<Uri>
             try {
                 attachmentUris = if (format == FORMAT_JPG) {
-                    val jpgFiles = createJpgFiles()
+                    val jpgFiles = createJpgFiles { d, t ->
+                        runOnUiSafely { openSheet = AppSheet.ExportProgress(format, d, t) }
+                    }
                     if (otherShare) writePublicFiles(jpgFiles) else writeCachedFiles(jpgFiles)
                 } else {
-                    val file = ExportFile(outputFileName(format), mimeForFormat(format), createOutputBytes(format))
+                    val bytes = if (format == FORMAT_PDF) {
+                        createPdfBytes { d, t ->
+                            runOnUiSafely { openSheet = AppSheet.ExportProgress(format, d, t) }
+                        }
+                    } else {
+                        createPptxBytes()
+                    }
+                    val file = ExportFile(outputFileName(format), mimeForFormat(format), bytes)
                     val files = arrayListOf(file)
                     if (otherShare) writePublicFiles(files) else writeCachedFiles(files)
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 runOnUiSafely {
                     exportInProgress = false
-                    Toast.makeText(this, "공유 화면을 열 수 없습니다.", Toast.LENGTH_LONG).show()
+                    closeSheet()
+                    Toast.makeText(
+                        this,
+                        "공유 파일 생성 실패: ${e.message ?: "알 수 없는 오류"}",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
                 return@submit
             }
             runOnUiSafely {
                 exportInProgress = false
+                closeSheet()
                 launchShareIntent(recipient, format, otherShare, attachmentUris)
             }
         }

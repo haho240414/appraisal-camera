@@ -19,4 +19,10 @@ sealed class AppSheet {
     data class ShareFormat(val recipient: String) : AppSheet()
     data object ConfirmClear : AppSheet()
     data class ConfirmDelete(val photo: MainActivity.PhotoItem) : AppSheet()
+
+    /**
+     * 익스포트(PPTX/PDF/JPG) 진행 표시.
+     * total = 0 이면 indeterminate spinner, 양수면 LinearProgressIndicator(current/total).
+     */
+    data class ExportProgress(val format: String, val current: Int, val total: Int) : AppSheet()
 }
