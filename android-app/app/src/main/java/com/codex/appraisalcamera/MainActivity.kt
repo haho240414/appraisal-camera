@@ -271,12 +271,51 @@ class MainActivity : ComponentActivity() {
                 // 후처리 압축 제거 — JpegQuality 60 으로 직접 저장. 디바이스마다
                 // 실패하던 "사진 용량 줄이기 실패" 토스트도 사라진다.
                 addPhoto(savedUri.toString(), capturedAt, false)
+                // 갤러리(MediaStore)에도 사본 저장 — 백그라운드, 실패해도 무시.
+                exportExecutor.submit { savePhotoToGallery(outputFile, capturedAt) }
             }
 
             override fun onError(exception: ImageCaptureException) {
                 Toast.makeText(this@MainActivity, "촬영 저장에 실패했습니다.", Toast.LENGTH_SHORT).show()
             }
         })
+    }
+
+    /**
+     * 촬영 직후 사진을 갤러리(MediaStore)에 사본 저장.
+     * 앱 내부 보관본은 그대로 두고, 사용자가 시스템 갤러리에서도 볼 수 있도록 추가 저장.
+     * minSdk 29 이므로 MediaStore Q+ API 사용 — WRITE_EXTERNAL_STORAGE 권한 불필요.
+     * 실패해도 촬영 자체에는 영향 없음 (Toast 등 표시하지 않음).
+     */
+    private fun savePhotoToGallery(sourceFile: File, capturedAt: Long) {
+        try {
+            val displayName = "appraisal_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.KOREA).format(Date(capturedAt))}.jpg"
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/AppraisalCamera")
+                put(MediaStore.Images.Media.DATE_TAKEN, capturedAt)
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val galleryUri = contentResolver.insert(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
+            ) ?: return
+            try {
+                contentResolver.openOutputStream(galleryUri)?.use { output ->
+                    sourceFile.inputStream().use { input -> input.copyTo(output) }
+                } ?: throw IOException("Cannot open gallery output stream")
+                val ready = ContentValues().apply {
+                    put(MediaStore.Images.Media.IS_PENDING, 0)
+                }
+                contentResolver.update(galleryUri, ready, null, null)
+            } catch (e: Exception) {
+                // 부분 쓰기 실패 시 row 정리 (galleryUri 만 만들어진 상태로 남지 않게).
+                contentResolver.delete(galleryUri, null, null)
+                throw e
+            }
+        } catch (_: Exception) {
+            // 촬영은 이미 성공했으므로 갤러리 저장 실패는 조용히 무시.
+        }
     }
 
     @Throws(IOException::class)
