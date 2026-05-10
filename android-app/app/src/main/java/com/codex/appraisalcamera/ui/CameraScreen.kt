@@ -856,16 +856,7 @@ private fun CategoryTabs(activity: MainActivity) {
 @Composable
 private fun SymbolPicker(activity: MainActivity) {
     if (activity.currentCategory == MainActivity.CATEGORY_CUSTOM) {
-        OutlinedTextField(
-            value = activity.currentSymbol,
-            onValueChange = {
-                activity.currentSymbol = it.trim()
-                activity.saveControlState()
-            },
-            label = { Text("기타사항 입력") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
+        CustomPresetPicker(activity, compact = false)
         return
     }
 
@@ -945,16 +936,7 @@ private fun SymbolPicker(activity: MainActivity) {
 @Composable
 private fun CompactSymbolPicker(activity: MainActivity) {
     if (activity.currentCategory == MainActivity.CATEGORY_CUSTOM) {
-        OutlinedTextField(
-            value = activity.currentSymbol,
-            onValueChange = {
-                activity.currentSymbol = it.trim()
-                activity.saveControlState()
-            },
-            label = { Text("기타사항") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
+        CustomPresetPicker(activity, compact = true)
         return
     }
 
@@ -1145,4 +1127,90 @@ private fun PhotoCountText(activity: MainActivity) {
         fontSize = 12.sp,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+}
+
+/**
+ * 기타 카테고리: 인근도로 / 물건전경 / 기계기구 / 개별입력 4 옵션.
+ * - 프리셋 버튼 클릭 → currentSymbol = 프리셋 라벨
+ * - 개별입력 → 텍스트 필드 노출, 사용자가 입력하는 값이 currentSymbol
+ * - currentSymbol 이 프리셋 중 하나면 그 프리셋이 선택된 상태로 표시
+ * - 그 외(빈 문자열 포함) → "개별입력" 모드로 간주
+ *
+ * @param compact true 면 좁은 사이드 패널용으로 폰트/패딩 축소
+ */
+@Composable
+private fun CustomPresetPicker(activity: MainActivity, compact: Boolean) {
+    val presets = MainActivity.CUSTOM_PRESETS
+    val isFreeform = activity.currentSymbol !in presets
+    val labelFontSize = if (compact) 12.sp else 14.sp
+    val rowHeight = if (compact) 32.dp else 38.dp
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        presets.forEach { preset ->
+            val selected = activity.currentSymbol == preset
+            CustomPresetButton(
+                label = preset,
+                selected = selected,
+                fontSize = labelFontSize,
+                height = rowHeight
+            ) {
+                activity.currentSymbol = preset
+                activity.saveControlState()
+            }
+        }
+        CustomPresetButton(
+            label = "개별입력",
+            selected = isFreeform,
+            fontSize = labelFontSize,
+            height = rowHeight
+        ) {
+            // 프리셋이 선택돼 있던 상태에서 개별입력으로 전환할 때 텍스트 필드를 비움.
+            if (activity.currentSymbol in presets) {
+                activity.currentSymbol = ""
+                activity.saveControlState()
+            }
+        }
+        if (isFreeform) {
+            OutlinedTextField(
+                value = activity.currentSymbol,
+                onValueChange = {
+                    activity.currentSymbol = it.trim()
+                    activity.saveControlState()
+                },
+                label = { Text("기타사항 입력") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun CustomPresetButton(
+    label: String,
+    selected: Boolean,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    height: Dp,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().height(height),
+        shape = MaterialTheme.shapes.small,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                label,
+                fontSize = fontSize,
+                fontWeight = FontWeight.SemiBold,
+                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }

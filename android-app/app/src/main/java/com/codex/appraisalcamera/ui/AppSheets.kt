@@ -221,6 +221,8 @@ private fun SettingsSheet(activity: MainActivity) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = 640.dp)
+                .verticalScroll(rememberScrollState())
                 .padding(20.dp)
                 .padding(bottom = 12.dp)
         ) {
@@ -280,6 +282,22 @@ private fun SettingsSheet(activity: MainActivity) {
                 onClick = { activity.toggleFloatingCaptureButton() }
             )
 
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            // 사진 자료 순서
+            Text(
+                "사진 자료 순서",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "사진자료(PPTX/PDF/JPG) 안에서 카테고리가 나오는 순서를 조정합니다.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
+            CategoryOrderEditor(activity)
+
             Spacer(Modifier.height(20.dp))
 
             Row(
@@ -291,6 +309,7 @@ private fun SettingsSheet(activity: MainActivity) {
                         activity.resetGuideDefaults()
                         alpha = activity.guideAlphaPercent.toFloat()
                         scale = activity.guideScalePercent.toFloat()
+                        activity.resetCategoryOrder()
                     },
                     modifier = Modifier.weight(1f),
                     shape = MaterialTheme.shapes.medium
@@ -303,6 +322,50 @@ private fun SettingsSheet(activity: MainActivity) {
                     shape = MaterialTheme.shapes.medium
                 ) {
                     Text("닫기")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryOrderEditor(activity: MainActivity) {
+    val order = activity.categoryOrder
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        order.forEachIndexed { index, category ->
+            Card(
+                shape = MaterialTheme.shapes.small,
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "${index + 1}.",
+                        modifier = Modifier.width(24.dp),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        activity.categoryLabel(category),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    TextButton(
+                        onClick = { activity.moveCategoryUp(category) },
+                        enabled = index > 0
+                    ) { Text("↑", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+                    TextButton(
+                        onClick = { activity.moveCategoryDown(category) },
+                        enabled = index < order.size - 1
+                    ) { Text("↓", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
                 }
             }
         }

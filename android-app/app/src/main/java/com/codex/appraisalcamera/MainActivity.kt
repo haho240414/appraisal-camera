@@ -96,6 +96,12 @@ class MainActivity : ComponentActivity() {
     /** 현재 열려 있는 시트/다이얼로그. CameraScreen 이 관찰. */
     var openSheet by mutableStateOf<AppSheet>(AppSheet.None)
 
+    /**
+     * 사진 자료 익스포트 시 카테고리 정렬 순서. SettingsSheet 에서 사용자가 조정.
+     * CATEGORY_FIELD 는 항상 마지막. 초기값은 land/building/extra/custom 순.
+     */
+    var categoryOrder by mutableStateOf<List<String>>(DEFAULT_CATEGORY_ORDER)
+
     // ---- Non-UI state ----
     private var imageCapture: ImageCapture? = null
     private var pendingExportBytes: ByteArray? = null
@@ -125,6 +131,7 @@ class MainActivity : ComponentActivity() {
         loadGuideSettings()
         loadEmailRecipient()
         loadMailApp()
+        loadCategoryOrder()
         restoreControlState(savedInstanceState)
 
         setContent {
@@ -283,7 +290,8 @@ class MainActivity : ComponentActivity() {
 
     /**
      * 촬영 직후 사진을 갤러리(MediaStore)에 사본 저장.
-     * 앱 내부 보관본은 그대로 두고, 사용자가 시스템 갤러리에서도 볼 수 있도록 추가 저장.
+     * 사진자료 익스포트와 똑같이 "촬영: yyyy.MM.dd HH:mm" 워터마크를 우측 하단에 굽는다.
+     * 앱 내부 원본은 그대로 두고(익스포트 시 워터마크는 재계산), 갤러리 사본만 별도 워터마크 베이크.
      * minSdk 29 이므로 MediaStore Q+ API 사용 — WRITE_EXTERNAL_STORAGE 권한 불필요.
      * 실패해도 촬영 자체에는 영향 없음 (Toast 등 표시하지 않음).
      */
@@ -300,22 +308,78 @@ class MainActivity : ComponentActivity() {
             val galleryUri = contentResolver.insert(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
             ) ?: return
+
+            var bitmap: Bitmap? = null
+            var oriented: Bitmap? = null
+            var stamped: Bitmap? = null
             try {
+                // 워터마크용 적당한 크기로 디코드 (메모리 절약).
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                FileInputStream(sourceFile).use { BitmapFactory.decodeStream(it, null, bounds) }
+                val maxSide = maxOf(bounds.outWidth, bounds.outHeight)
+                var sample = 1
+                while (maxSide / sample > 2400) sample *= 2
+                val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+                bitmap = FileInputStream(sourceFile).use {
+                    BitmapFactory.decodeStream(it, null, opts)
+                } ?: throw IOException("decode failed")
+
+                oriented = rotateBitmap(bitmap, readExifOrientation(Uri.fromFile(sourceFile)))
+                stamped = drawTimestampWatermark(oriented, "촬영: ${formatDate(capturedAt)}")
+
                 contentResolver.openOutputStream(galleryUri)?.use { output ->
-                    sourceFile.inputStream().use { input -> input.copyTo(output) }
+                    stamped.compress(Bitmap.CompressFormat.JPEG, 85, output)
                 } ?: throw IOException("Cannot open gallery output stream")
+
                 val ready = ContentValues().apply {
                     put(MediaStore.Images.Media.IS_PENDING, 0)
                 }
                 contentResolver.update(galleryUri, ready, null, null)
             } catch (e: Exception) {
-                // 부분 쓰기 실패 시 row 정리 (galleryUri 만 만들어진 상태로 남지 않게).
                 contentResolver.delete(galleryUri, null, null)
                 throw e
+            } finally {
+                if (stamped != null && stamped !== oriented) stamped.recycle()
+                if (oriented != null && oriented !== bitmap) oriented.recycle()
+                bitmap?.recycle()
             }
         } catch (_: Exception) {
             // 촬영은 이미 성공했으므로 갤러리 저장 실패는 조용히 무시.
         }
+    }
+
+    /**
+     * 사진 우측 하단에 반투명 검은 박스 + 흰 글씨로 촬영 시각을 굽는다.
+     * 익스포트의 drawOutputStamp / PptxExporter.stampBox 와 시각적 일관성 유지.
+     */
+    private fun drawTimestampWatermark(source: Bitmap, text: String): Bitmap {
+        val output = source.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(output)
+
+        val textSize = maxOf(36f, output.width * 0.025f)
+        val padX = textSize * 0.55f
+        val padY = textSize * 0.32f
+        val margin = textSize * 0.55f
+
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
+        textPaint.color = Color.WHITE
+        textPaint.textSize = textSize
+        textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+
+        val bounds = Rect()
+        textPaint.getTextBounds(text, 0, text.length, bounds)
+        val metrics = textPaint.fontMetrics
+
+        val boxW = bounds.width() + padX * 2f
+        val boxH = (metrics.descent - metrics.ascent) + padY * 2f
+        val left = output.width - boxW - margin
+        val top = output.height - boxH - margin
+
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        bgPaint.color = Color.argb(175, 0, 0, 0)
+        canvas.drawRect(RectF(left, top, left + boxW, top + boxH), bgPaint)
+        canvas.drawText(text, left + padX, top + padY - metrics.ascent, textPaint)
+        return output
     }
 
     @Throws(IOException::class)
@@ -546,8 +610,51 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun categoryRank(category: String): Int {
-        for (i in CATEGORY_ORDER.indices) if (CATEGORY_ORDER[i] == category) return i
+        // 사용자 설정 categoryOrder 를 우선 적용. CATEGORY_FIELD 는 항상 마지막.
+        val idx = categoryOrder.indexOf(category)
+        if (idx >= 0) return idx
+        if (category == CATEGORY_FIELD) return categoryOrder.size
         return 99
+    }
+
+    // ---- Category order (사진 자료 정렬 순서) ----
+
+    private fun loadCategoryOrder() {
+        val csv = prefs().getString(PREF_CATEGORY_ORDER, null) ?: return
+        val parts = csv.split(",").filter { it in DEFAULT_CATEGORY_ORDER }
+        // 파싱이 정확히 4개여야 인정 — 누락된 카테고리가 있으면 기본값 유지.
+        if (parts.size == DEFAULT_CATEGORY_ORDER.size && parts.toSet() == DEFAULT_CATEGORY_ORDER.toSet()) {
+            categoryOrder = parts
+        }
+    }
+
+    private fun saveCategoryOrder() {
+        prefs().edit().putString(PREF_CATEGORY_ORDER, categoryOrder.joinToString(",")).apply()
+    }
+
+    fun moveCategoryUp(category: String) {
+        val idx = categoryOrder.indexOf(category)
+        if (idx <= 0) return
+        val list = categoryOrder.toMutableList()
+        list.removeAt(idx)
+        list.add(idx - 1, category)
+        categoryOrder = list
+        saveCategoryOrder()
+    }
+
+    fun moveCategoryDown(category: String) {
+        val idx = categoryOrder.indexOf(category)
+        if (idx < 0 || idx >= categoryOrder.size - 1) return
+        val list = categoryOrder.toMutableList()
+        list.removeAt(idx)
+        list.add(idx + 1, category)
+        categoryOrder = list
+        saveCategoryOrder()
+    }
+
+    fun resetCategoryOrder() {
+        categoryOrder = DEFAULT_CATEGORY_ORDER
+        saveCategoryOrder()
     }
 
     private fun symbolRank(photo: PhotoItem): Int {
@@ -1541,10 +1648,15 @@ class MainActivity : ComponentActivity() {
         const val CATEGORY_EXTRA = "extra"
         const val CATEGORY_CUSTOM = "custom"
         const val CATEGORY_FIELD = "field"
+        const val PREF_CATEGORY_ORDER = "category_order"
         val CATEGORY_ORDER = arrayOf(CATEGORY_LAND, CATEGORY_BUILDING, CATEGORY_EXTRA, CATEGORY_CUSTOM, CATEGORY_FIELD)
+        val DEFAULT_CATEGORY_ORDER = listOf(CATEGORY_LAND, CATEGORY_BUILDING, CATEGORY_EXTRA, CATEGORY_CUSTOM)
         val LAND_SYMBOLS = Array(99) { (it + 1).toString() }
         val BUILDING_SYMBOLS = arrayOf("가","나","다","라","마","바","사","아","자","차","카","타","파","하")
         val EXTRA_SYMBOLS = arrayOf("ㄱ","ㄴ","ㄷ","ㄹ","ㅁ","ㅂ","ㅅ","ㅇ","ㅈ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ")
         val BUILDING_SUB_SYMBOLS = arrayOf("없음","-1","-2","-3","-4","-5","-6","-7","-8","-9")
+
+        // 기타 카테고리 프리셋 — SymbolPicker 가 4개 버튼 + 개별입력 텍스트필드 렌더.
+        val CUSTOM_PRESETS = arrayOf("인근도로", "물건전경", "기계기구")
     }
 }
