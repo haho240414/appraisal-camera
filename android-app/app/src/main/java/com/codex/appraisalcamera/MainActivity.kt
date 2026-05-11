@@ -105,6 +105,9 @@ class MainActivity : ComponentActivity() {
     /** 사진자료 한 페이지에 들어갈 사진 수. 짝수 (2/4/6) 만 허용, 기본 4. */
     var photosPerPage by mutableStateOf(DEFAULT_PHOTOS_PER_PAGE)
 
+    /** 저장된 작업(사진 + 물건지 + 모드 + 설정 일체) 목록. SessionsSheet 가 관찰. */
+    val sessions: SnapshotStateList<SavedSession> = mutableStateListOf()
+
     // ---- Non-UI state ----
     private var imageCapture: ImageCapture? = null
     private var pendingExportBytes: ByteArray? = null
@@ -136,6 +139,7 @@ class MainActivity : ComponentActivity() {
         loadMailApp()
         loadCategoryOrder()
         loadPhotosPerPage()
+        loadSessions()
         restoreControlState(savedInstanceState)
 
         setContent {
@@ -609,6 +613,28 @@ class MainActivity : ComponentActivity() {
         openSheet = AppSheet.ConfirmDelete(item)
     }
 
+    fun showSessionsSheet() {
+        openSheet = AppSheet.Sessions
+    }
+
+    fun showSaveSessionPrompt() {
+        openSheet = AppSheet.SaveSessionPrompt
+    }
+
+    fun confirmLoadSession(session: SavedSession) {
+        // 현재 사진이 비어 있으면 바로 로드, 있으면 확인 다이얼로그.
+        if (photos.isEmpty()) {
+            loadSession(session)
+            openSheet = AppSheet.None
+        } else {
+            openSheet = AppSheet.ConfirmLoadSession(session)
+        }
+    }
+
+    fun confirmDeleteSession(session: SavedSession) {
+        openSheet = AppSheet.ConfirmDeleteSession(session)
+    }
+
     fun sortedPhotos(): List<PhotoItem> {
         return photos.sortedWith(compareBy({ categoryRank(it.category) }, { symbolRank(it) }, { it.createdAt }))
     }
@@ -676,6 +702,195 @@ class MainActivity : ComponentActivity() {
         if (value !in ALLOWED_PHOTOS_PER_PAGE) return
         photosPerPage = value
         savePhotosPerPage()
+    }
+
+    // ---- Sessions (저장된 작업) ----
+
+    private fun sessionsFile(): File = File(filesDir, "sessions.json")
+
+    private fun loadSessions() {
+        sessions.clear()
+        try {
+            val file = sessionsFile()
+            if (!file.exists()) return
+            val arr = JSONArray(file.readText())
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                sessions.add(parseSession(obj))
+            }
+            // 최신 저장 순으로 정렬.
+            val sorted = sessions.sortedByDescending { it.savedAt }
+            sessions.clear()
+            sessions.addAll(sorted)
+        } catch (_: Exception) {
+            sessions.clear()
+        }
+    }
+
+    private fun parseSession(obj: JSONObject): SavedSession {
+        val photoArr = obj.optJSONArray("photos") ?: JSONArray()
+        val photoList = ArrayList<PhotoItem>(photoArr.length())
+        for (i in 0 until photoArr.length()) {
+            val p = photoArr.getJSONObject(i)
+            photoList.add(
+                PhotoItem(
+                    id = p.optString("id", UUID.randomUUID().toString()),
+                    category = p.optString("category", CATEGORY_LAND),
+                    symbol = p.optString("symbol", ""),
+                    memo = p.optString("memo", ""),
+                    uri = p.optString("uri", ""),
+                    createdAt = p.optLong("createdAt", System.currentTimeMillis()),
+                    stamped = p.optBoolean("stamped", false),
+                    debtorName = p.optString("debtorName", ""),
+                    fieldSurveyor = p.optString("fieldSurveyor", "")
+                )
+            )
+        }
+        val orderArr = obj.optJSONArray("categoryOrder")
+        val order = if (orderArr != null) {
+            (0 until orderArr.length()).map { orderArr.getString(it) }
+                .filter { it in DEFAULT_CATEGORY_ORDER }
+                .let { if (it.toSet() == DEFAULT_CATEGORY_ORDER.toSet()) it else DEFAULT_CATEGORY_ORDER }
+        } else DEFAULT_CATEGORY_ORDER
+        val perPage = obj.optInt("photosPerPage", DEFAULT_PHOTOS_PER_PAGE).let {
+            if (it in ALLOWED_PHOTOS_PER_PAGE) it else DEFAULT_PHOTOS_PER_PAGE
+        }
+        return SavedSession(
+            id = obj.optString("id", UUID.randomUUID().toString()),
+            name = obj.optString("name", "이름 없음"),
+            savedAt = obj.optLong("savedAt", System.currentTimeMillis()),
+            propertyAddress = obj.optString("propertyAddress", ""),
+            appMode = obj.optString("appMode", MODE_SELF_APPRAISAL),
+            debtorName = obj.optString("debtorName", ""),
+            fieldSurveyor = obj.optString("fieldSurveyor", ""),
+            categoryOrder = order,
+            photosPerPage = perPage,
+            photos = photoList
+        )
+    }
+
+    private fun saveSessionsFile() {
+        try {
+            val arr = JSONArray()
+            for (s in sessions) {
+                val obj = JSONObject()
+                obj.put("id", s.id)
+                obj.put("name", s.name)
+                obj.put("savedAt", s.savedAt)
+                obj.put("propertyAddress", s.propertyAddress)
+                obj.put("appMode", s.appMode)
+                obj.put("debtorName", s.debtorName)
+                obj.put("fieldSurveyor", s.fieldSurveyor)
+                val orderArr = JSONArray()
+                s.categoryOrder.forEach { orderArr.put(it) }
+                obj.put("categoryOrder", orderArr)
+                obj.put("photosPerPage", s.photosPerPage)
+                val photoArr = JSONArray()
+                for (p in s.photos) {
+                    val pObj = JSONObject()
+                    pObj.put("id", p.id)
+                    pObj.put("category", p.category)
+                    pObj.put("symbol", p.symbol)
+                    pObj.put("memo", p.memo)
+                    pObj.put("uri", p.uri)
+                    pObj.put("createdAt", p.createdAt)
+                    pObj.put("stamped", p.stamped)
+                    pObj.put("debtorName", p.debtorName)
+                    pObj.put("fieldSurveyor", p.fieldSurveyor)
+                    photoArr.put(pObj)
+                }
+                obj.put("photos", photoArr)
+                arr.put(obj)
+            }
+            sessionsFile().writeText(arr.toString())
+        } catch (_: Exception) {
+            // 저장 실패는 다음 저장 시 재시도되므로 silent.
+        }
+    }
+
+    /** 현재 상태 → 새 세션으로 저장. */
+    fun saveCurrentAsSession(name: String) {
+        val trimmed = name.trim().ifEmpty {
+            documentHeaderText().ifEmpty { modeDefaultTitle() }
+        }
+        val session = SavedSession(
+            id = UUID.randomUUID().toString(),
+            name = trimmed,
+            savedAt = System.currentTimeMillis(),
+            propertyAddress = propertyAddress,
+            appMode = appMode,
+            debtorName = debtorName,
+            fieldSurveyor = fieldSurveyor,
+            categoryOrder = categoryOrder.toList(),
+            photosPerPage = photosPerPage,
+            photos = photos.toList()
+        )
+        sessions.add(0, session)
+        saveSessionsFile()
+        Toast.makeText(this, "\"${session.name}\" 으로 저장했습니다", Toast.LENGTH_SHORT).show()
+    }
+
+    /** 기존 세션 위에 덮어쓰기 — id 동일, name/savedAt 갱신. */
+    fun overwriteSession(existing: SavedSession) {
+        val idx = sessions.indexOfFirst { it.id == existing.id }
+        if (idx < 0) {
+            // 이미 삭제된 세션이면 새로 저장.
+            saveCurrentAsSession(existing.name)
+            return
+        }
+        val updated = existing.copy(
+            savedAt = System.currentTimeMillis(),
+            propertyAddress = propertyAddress,
+            appMode = appMode,
+            debtorName = debtorName,
+            fieldSurveyor = fieldSurveyor,
+            categoryOrder = categoryOrder.toList(),
+            photosPerPage = photosPerPage,
+            photos = photos.toList()
+        )
+        sessions[idx] = updated
+        // 최신순 재정렬.
+        val sorted = sessions.sortedByDescending { it.savedAt }
+        sessions.clear()
+        sessions.addAll(sorted)
+        saveSessionsFile()
+        Toast.makeText(this, "\"${updated.name}\" 을(를) 갱신했습니다", Toast.LENGTH_SHORT).show()
+    }
+
+    /** 세션 → 현재 상태로 불러오기. 사진 파일 자체는 그대로 두고 메타만 교체. */
+    fun loadSession(session: SavedSession) {
+        propertyAddress = session.propertyAddress
+        savePropertyAddress()
+        appMode = session.appMode
+        saveAppMode()
+        debtorName = session.debtorName
+        fieldSurveyor = session.fieldSurveyor
+        saveFieldSurveyInfo()
+        categoryOrder = session.categoryOrder
+        saveCategoryOrder()
+        photosPerPage = session.photosPerPage
+        savePhotosPerPage()
+        photos.clear()
+        photos.addAll(session.photos)
+        savePhotos()
+        Toast.makeText(this, "\"${session.name}\" 작업을 불러왔습니다", Toast.LENGTH_SHORT).show()
+    }
+
+    fun deleteSession(session: SavedSession) {
+        val removed = sessions.removeAll { it.id == session.id }
+        if (removed) {
+            saveSessionsFile()
+            Toast.makeText(this, "삭제했습니다", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun renameSession(session: SavedSession, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isEmpty()) return
+        val idx = sessions.indexOfFirst { it.id == session.id }
+        if (idx < 0) return
+        sessions[idx] = sessions[idx].copy(name = trimmed)
+        saveSessionsFile()
     }
 
     private fun symbolRank(photo: PhotoItem): Int {
@@ -1176,10 +1391,7 @@ class MainActivity : ComponentActivity() {
         paint.textSize = 22f * sx
         canvas.drawText("사 진 용 지", pageWidth / 2f, 72f * sy, paint)
 
-        paint.textAlign = Paint.Align.RIGHT
-        paint.typeface = Typeface.DEFAULT
-        paint.textSize = 10f * sx
-        canvas.drawText("Page : $pageNumber", 530f * sx, 105f * sy, paint)
+        // 상단 페이지 번호는 제거 — 하단 한 곳에만 표시.
 
         val slots = computeSlots(pageWidth, pageHeight, perPage)
         // 캡션 폰트 크기는 슬롯 너비에 비례 — 4/6장 그리드에서는 자동으로 작아짐.
@@ -1685,6 +1897,23 @@ class MainActivity : ComponentActivity() {
     data class ExportFile(val name: String, val mimeType: String, val bytes: ByteArray)
 
     data class NextSymbol(val base: String, val sub: String)
+
+    /**
+     * 저장된 작업 — 사진 + 물건지 + 모드 + 카테고리 순서 + 페이지당 사진 수.
+     * SessionsSheet 에서 불러오면 이 데이터로 현재 상태를 통째로 교체.
+     */
+    data class SavedSession(
+        val id: String,
+        val name: String,
+        val savedAt: Long,
+        val propertyAddress: String,
+        val appMode: String,
+        val debtorName: String,
+        val fieldSurveyor: String,
+        val categoryOrder: List<String>,
+        val photosPerPage: Int,
+        val photos: List<PhotoItem>
+    )
 
     companion object {
         const val PREFS = "appraisal_photos"

@@ -242,7 +242,7 @@ final class PptxExporter {
         xml.append("<p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>");
         xml.append(textShape(2, headerText, emu(30.35), emu(20), emu(300), emu(24), 1100, false, "l"));
         xml.append(textShape(3, "사 진 용 지", emu(0), emu(80), SLIDE_CX, emu(36), 1800, true, "ctr"));
-        xml.append(textShape(4, "Page : " + pageNumber, emu(505), emu(132), emu(80), emu(20), 1000, false, "r"));
+        // 상단 페이지 번호는 제거 — 하단 한 곳에만 표시.
 
         int id = 5;
         for (SlideItem item : slide.items) {

@@ -55,6 +55,9 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.codex.appraisalcamera.AppSheet
 import com.codex.appraisalcamera.MainActivity
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * 메인 화면에 떠 있는 시트/다이얼로그 디스패처.
@@ -77,6 +80,10 @@ fun AppSheets(activity: MainActivity) {
         AppSheet.ConfirmClear -> ConfirmClearDialog(activity)
         is AppSheet.ConfirmDelete -> ConfirmDeleteDialog(activity, sheet.photo)
         is AppSheet.ExportProgress -> ExportProgressSheet(sheet.format, sheet.current, sheet.total)
+        AppSheet.Sessions -> SessionsSheet(activity)
+        AppSheet.SaveSessionPrompt -> SaveSessionPromptSheet(activity)
+        is AppSheet.ConfirmLoadSession -> ConfirmLoadSessionDialog(activity, sheet.session)
+        is AppSheet.ConfirmDeleteSession -> ConfirmDeleteSessionDialog(activity, sheet.session)
     }
 }
 
@@ -876,6 +883,275 @@ private fun ConfirmDeleteDialog(activity: MainActivity, item: MainActivity.Photo
         dismissButton = {
             TextButton(
                 onClick = { activity.openSheet = AppSheet.PhotoList }
+            ) { Text("취소") }
+        }
+    )
+}
+
+// =================================================================
+// Sessions (저장된 작업)
+// =================================================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SessionsSheet(activity: MainActivity) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val list = activity.sessions
+    ModalBottomSheet(
+        onDismissRequest = { activity.closeSheet() },
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 20.dp)
+        ) {
+            Text(
+                "저장된 작업",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = list.size.toString(),
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "건 저장됨",
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+
+            // 현재 상태 저장 버튼
+            Button(
+                onClick = { activity.showSaveSessionPrompt() },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Text("현재 상태 새로 저장 (사진 ${activity.photos.size}장)", fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(12.dp))
+
+            if (list.isEmpty()) {
+                Card(
+                    shape = MaterialTheme.shapes.medium,
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text(
+                            "아직 저장된 작업이 없어요",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "위 버튼을 눌러 현재 사진과 설정을 작업으로 저장하면 나중에 다시 불러와서 이어서 편집할 수 있습니다.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.heightIn(max = 540.dp)
+                ) {
+                    items(list, key = { it.id }) { session ->
+                        Box(modifier = Modifier.animateItem()) {
+                            SessionCard(activity, session)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SessionCard(activity: MainActivity, session: MainActivity.SavedSession) {
+    val df = remember { SimpleDateFormat("yyyy.MM.dd HH:mm", Locale.KOREA) }
+    Card(
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                session.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "${df.format(Date(session.savedAt))} · 사진 ${session.photos.size}장 · ${if (session.appMode == MainActivity.MODE_FIELD_SURVEY) "현지답사" else "자체감정"}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (session.propertyAddress.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    session.propertyAddress,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Button(
+                    onClick = { activity.confirmLoadSession(session) },
+                    modifier = Modifier.weight(1f),
+                    shape = MaterialTheme.shapes.small,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                ) {
+                    Text("불러오기", fontSize = 13.sp)
+                }
+                OutlinedButton(
+                    onClick = { activity.overwriteSession(session) },
+                    modifier = Modifier.weight(1f),
+                    shape = MaterialTheme.shapes.small,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                ) {
+                    Text("덮어쓰기", fontSize = 13.sp)
+                }
+                TextButton(
+                    onClick = { activity.confirmDeleteSession(session) },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("삭제", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SaveSessionPromptSheet(activity: MainActivity) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val defaultName = activity.propertyAddress.ifBlank { activity.modeDefaultTitle() }
+    var text by remember { mutableStateOf(defaultName) }
+    ModalBottomSheet(
+        onDismissRequest = { activity.openSheet = AppSheet.Sessions },
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+                .imePadding()
+        ) {
+            Text(
+                "작업 이름",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "나중에 작업 목록에서 이 이름으로 보입니다.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("이름") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { activity.openSheet = AppSheet.Sessions },
+                    modifier = Modifier.weight(1f)
+                ) { Text("취소") }
+                Button(
+                    onClick = {
+                        activity.saveCurrentAsSession(text)
+                        activity.openSheet = AppSheet.Sessions
+                    },
+                    modifier = Modifier.weight(1f)
+                ) { Text("저장") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConfirmLoadSessionDialog(activity: MainActivity, session: MainActivity.SavedSession) {
+    AlertDialog(
+        onDismissRequest = { activity.openSheet = AppSheet.Sessions },
+        title = { Text("불러오기", fontWeight = FontWeight.Bold) },
+        text = {
+            Text(
+                "현재 등록된 사진 ${activity.photos.size}장이 \"${session.name}\" (사진 ${session.photos.size}장)으로 교체됩니다. 계속할까요?",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    activity.loadSession(session)
+                    activity.closeSheet()
+                }
+            ) { Text("불러오기", fontWeight = FontWeight.SemiBold) }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = { activity.openSheet = AppSheet.Sessions }
+            ) { Text("취소") }
+        }
+    )
+}
+
+@Composable
+private fun ConfirmDeleteSessionDialog(activity: MainActivity, session: MainActivity.SavedSession) {
+    AlertDialog(
+        onDismissRequest = { activity.openSheet = AppSheet.Sessions },
+        title = { Text("작업 삭제", fontWeight = FontWeight.Bold) },
+        text = {
+            Text(
+                "\"${session.name}\" 작업을 목록에서 삭제합니다. 사진 파일 자체는 그대로 두고 작업 메타만 지웁니다.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    activity.deleteSession(session)
+                    activity.openSheet = AppSheet.Sessions
+                },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) { Text("삭제", fontWeight = FontWeight.SemiBold) }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = { activity.openSheet = AppSheet.Sessions }
             ) { Text("취소") }
         }
     )

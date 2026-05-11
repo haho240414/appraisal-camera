@@ -564,6 +564,7 @@ private fun LandscapeActionRail(activity: MainActivity, cardAlpha: Float) {
             RailActionButton("저장") { activity.showExportFormatDialog() }
             RailActionButton("공유") { activity.showEmailDialog() }
             RailActionButton("목록") { activity.showPhotoListDialog() }
+            RailActionButton("내 작업") { activity.showSessionsSheet() }
             RailActionButton("설정") { activity.showGuideSettingsDialog() }
             RailActionButton("도움말") { activity.showHelpDialog() }
             RailActionButton("전체삭제", danger = true) { activity.confirmClear() }
@@ -715,6 +716,10 @@ private fun OverflowMenu(activity: MainActivity) {
             DropdownMenuItem(text = { Text("목록") }, onClick = {
                 expanded = false
                 activity.showPhotoListDialog()
+            })
+            DropdownMenuItem(text = { Text("내 작업") }, onClick = {
+                expanded = false
+                activity.showSessionsSheet()
             })
             DropdownMenuItem(text = { Text("설정") }, onClick = {
                 expanded = false
