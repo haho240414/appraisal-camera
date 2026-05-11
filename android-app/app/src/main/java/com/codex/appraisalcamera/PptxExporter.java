@@ -25,11 +25,6 @@ import java.util.zip.ZipOutputStream;
 final class PptxExporter {
     private static final long SLIDE_CX = emu(595.5);
     private static final long SLIDE_CY = emu(842.25);
-    private static final long PHOTO_X = emu(119.56);
-    private static final long PHOTO_W = emu(357.17);
-    private static final long PHOTO_H = emu(252.28);
-    private static final long TOP_PHOTO_Y = emu(842.25 - 416.86 - 252.28);
-    private static final long BOTTOM_PHOTO_Y = emu(842.25 - 117.05 - 252.28);
     private static final int NORMALIZED_IMAGE_WIDTH = 1429;
     private static final int NORMALIZED_IMAGE_HEIGHT = 1009;
 
@@ -41,7 +36,9 @@ final class PptxExporter {
      * 도중에 한 사진이라도 실패하면 그 사진은 SKIP 하고 나머지로 PPTX 를 만든다.
      * 모두 실패하면 IOException.
      */
-    static Result createWithStats(Context context, List<PhotoData> photos, String headerText) throws IOException {
+    static Result createWithStats(Context context, List<PhotoData> photos, String headerText, int photosPerPage) throws IOException {
+        int perPage = (photosPerPage == 2 || photosPerPage == 4 || photosPerPage == 6) ? photosPerPage : 4;
+        SlotLayout[] slotLayouts = computeSlideLayout(perPage);
         // 1) 사진을 미리 모두 디코드 — 실패한 것은 skip.
         ArrayList<DecodedPhoto> decoded = new ArrayList<>();
         int skipped = 0;
@@ -57,13 +54,12 @@ final class PptxExporter {
             throw new IOException("디코드할 수 있는 사진이 없습니다 (skipped=" + skipped + ")");
         }
 
-        // 2) 디코드 성공한 사진만으로 슬라이드 구성.
+        // 2) 디코드 성공한 사진을 perPage 단위로 묶어 슬라이드 구성.
         ArrayList<SlideData> slides = new ArrayList<>();
-        for (int i = 0; i < decoded.size(); i += 2) {
+        for (int i = 0; i < decoded.size(); i += perPage) {
             SlideData slide = new SlideData();
-            slide.items.add(new SlideItem(decoded.get(i).photo, true));
-            if (i + 1 < decoded.size()) {
-                slide.items.add(new SlideItem(decoded.get(i + 1).photo, false));
+            for (int s = 0; s < perPage && i + s < decoded.size(); s++) {
+                slide.items.add(new SlideItem(decoded.get(i + s).photo, s));
             }
             slides.add(slide);
         }
@@ -96,16 +92,20 @@ final class PptxExporter {
                     imageIndex++;
                     decodedIndex++;
                 }
-                write(zip, "ppt/slides/slide" + slideNumber + ".xml", slideXml(slide, slideNumber, headerText));
+                write(zip, "ppt/slides/slide" + slideNumber + ".xml", slideXml(slide, slideNumber, headerText, slotLayouts));
                 write(zip, "ppt/slides/_rels/slide" + slideNumber + ".xml.rels", slideRels(slide));
             }
         }
         return new Result(bytes.toByteArray(), skipped);
     }
 
-    /** Backwards-compatible wrapper. */
+    /** Backwards-compatible wrappers. */
     static byte[] create(Context context, List<PhotoData> photos, String headerText) throws IOException {
-        return createWithStats(context, photos, headerText).bytes;
+        return createWithStats(context, photos, headerText, 2).bytes;
+    }
+
+    static Result createWithStats(Context context, List<PhotoData> photos, String headerText) throws IOException {
+        return createWithStats(context, photos, headerText, 2);
     }
 
     static final class Result {
@@ -234,7 +234,7 @@ final class PptxExporter {
         return output;
     }
 
-    private static String slideXml(SlideData slide, int pageNumber, String headerText) {
+    private static String slideXml(SlideData slide, int pageNumber, String headerText, SlotLayout[] slotLayouts) {
         StringBuilder xml = new StringBuilder();
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
         xml.append("<p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">");
@@ -246,17 +246,28 @@ final class PptxExporter {
 
         int id = 5;
         for (SlideItem item : slide.items) {
-            long y = item.top ? TOP_PHOTO_Y : BOTTOM_PHOTO_Y;
-            xml.append(frameRect(id++, PHOTO_X, y, PHOTO_W, PHOTO_H));
-            xml.append(picture(id++, item.relationshipId, item.imageName, PHOTO_X, y, PHOTO_W, PHOTO_H));
+            if (item.slotIndex < 0 || item.slotIndex >= slotLayouts.length) continue;
+            SlotLayout slot = slotLayouts[item.slotIndex];
+            xml.append(frameRect(id++, slot.x, slot.y, slot.w, slot.h));
+            xml.append(picture(id++, item.relationshipId, item.imageName, slot.x, slot.y, slot.w, slot.h));
             if (item.photo.stamp != null && !item.photo.stamp.isEmpty()) {
-                xml.append(stampBox(id++, item.photo.stamp, PHOTO_X + PHOTO_W - emu(116), y + PHOTO_H - emu(24), emu(108), emu(17)));
+                xml.append(stampBoxSized(id++, item.photo.stamp,
+                        slot.stampX, slot.stampY, slot.stampW, slot.stampH, slot.stampFontSize));
             }
-            xml.append(textShape(id++, item.photo.caption, emu(80), y + PHOTO_H + emu(22), emu(435), emu(25), 1100, false, "ctr"));
+            xml.append(textShape(id++, item.photo.caption,
+                    slot.captionX, slot.captionY, slot.captionW, slot.captionH,
+                    slot.captionFontSize, false, "ctr"));
         }
         xml.append(textShape(id, "Page : " + pageNumber, emu(455), emu(805), emu(120), emu(20), 1000, false, "r"));
         xml.append("</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>");
         return xml.toString();
+    }
+
+    private static String stampBoxSized(int id, String text, long x, long y, long w, long h, int fontSize) {
+        return "<p:sp><p:nvSpPr><p:cNvPr id=\"" + id + "\" name=\"stamp\"/><p:cNvSpPr txBox=\"1\"/><p:nvPr/></p:nvSpPr>"
+                + "<p:spPr><a:xfrm><a:off x=\"" + x + "\" y=\"" + y + "\"/><a:ext cx=\"" + w + "\" cy=\"" + h + "\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val=\"000000\"><a:alpha val=\"72000\"/></a:srgbClr></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr>"
+                + txBody(text, fontSize, false, "r", "FFFFFF")
+                + "</p:sp>";
     }
 
     private static String frameRect(int id, long x, long y, long w, long h) {
@@ -431,14 +442,83 @@ final class PptxExporter {
 
     private static final class SlideItem {
         final PhotoData photo;
-        final boolean top;
+        final int slotIndex;
         String relationshipId;
         String imageName;
 
-        SlideItem(PhotoData photo, boolean top) {
+        SlideItem(PhotoData photo, int slotIndex) {
             this.photo = photo;
-            this.top = top;
+            this.slotIndex = slotIndex;
         }
+    }
+
+    /** 각 슬롯의 위치/크기/캡션·도장 정보. EMU 단위. */
+    private static final class SlotLayout {
+        final long x, y, w, h;
+        final long captionX, captionY, captionW, captionH;
+        final long stampX, stampY, stampW, stampH;
+        final int captionFontSize;
+        final int stampFontSize;
+        SlotLayout(long x, long y, long w, long h,
+                   long capX, long capY, long capW, long capH,
+                   long stmpX, long stmpY, long stmpW, long stmpH,
+                   int captionFontSize, int stampFontSize) {
+            this.x = x; this.y = y; this.w = w; this.h = h;
+            this.captionX = capX; this.captionY = capY; this.captionW = capW; this.captionH = capH;
+            this.stampX = stmpX; this.stampY = stmpY; this.stampW = stmpW; this.stampH = stmpH;
+            this.captionFontSize = captionFontSize;
+            this.stampFontSize = stampFontSize;
+        }
+    }
+
+    /**
+     * 슬라이드 내 사진 슬롯 레이아웃 계산. count 는 2/4/6 만 지원.
+     * 좌표는 EMU 단위. 캡션/도장 폰트 크기는 그리드에 맞춰 자동 조정.
+     */
+    private static SlotLayout[] computeSlideLayout(int count) {
+        int cols, rows;
+        if (count == 2) { cols = 1; rows = 2; }
+        else if (count == 6) { cols = 2; rows = 3; }
+        else { cols = 2; rows = 2; }
+
+        double sideMargin = 50.0;
+        double topMargin = 120.0;
+        double bottomMargin = 25.0;
+        double gap = 12.0;
+        double captionHeight = 25.0;
+
+        double availWidth = 595.5 - sideMargin * 2;
+        double availHeight = 842.25 - topMargin - bottomMargin;
+        double photoWidth = (availWidth - gap * (cols - 1)) / cols;
+        double rowHeight = availHeight / rows;
+        double photoHeight = rowHeight - captionHeight - gap;
+
+        int captionFontSize = (rows >= 3) ? 750 : (cols >= 2 ? 900 : 1100);
+        int stampFontSize = (rows >= 3) ? 600 : (cols >= 2 ? 700 : 850);
+        double stampW = Math.min(120.0, photoWidth * 0.36);
+        double stampH = (rows >= 3) ? 13.0 : 17.0;
+
+        SlotLayout[] slots = new SlotLayout[cols * rows];
+        int idx = 0;
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+                double x = sideMargin + c * (photoWidth + gap);
+                double y = topMargin + r * rowHeight;
+                double capX = x + 5;
+                double capY = y + photoHeight + 4;
+                double capW = photoWidth - 10;
+                double capH = captionHeight - 4;
+                double stX = x + photoWidth - stampW - 8;
+                double stY = y + photoHeight - stampH - 8;
+                slots[idx++] = new SlotLayout(
+                    emu(x), emu(y), emu(photoWidth), emu(photoHeight),
+                    emu(capX), emu(capY), emu(capW), emu(capH),
+                    emu(stX), emu(stY), emu(stampW), emu(stampH),
+                    captionFontSize, stampFontSize
+                );
+            }
+        }
+        return slots;
     }
 
 }

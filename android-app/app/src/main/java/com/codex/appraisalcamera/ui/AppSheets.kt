@@ -284,6 +284,22 @@ private fun SettingsSheet(activity: MainActivity) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
+            // 한 페이지 사진 수
+            Text(
+                "한 페이지 사진 수",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "사진자료 한 페이지에 들어갈 사진 수입니다. 부족한 페이지는 자동으로 빈 슬롯으로 둡니다.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
+            PhotosPerPagePicker(activity)
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
             // 사진 자료 순서
             Text(
                 "사진 자료 순서",
@@ -310,6 +326,7 @@ private fun SettingsSheet(activity: MainActivity) {
                         alpha = activity.guideAlphaPercent.toFloat()
                         scale = activity.guideScalePercent.toFloat()
                         activity.resetCategoryOrder()
+                        activity.applyPhotosPerPage(MainActivity.DEFAULT_PHOTOS_PER_PAGE)
                     },
                     modifier = Modifier.weight(1f),
                     shape = MaterialTheme.shapes.medium
@@ -322,6 +339,38 @@ private fun SettingsSheet(activity: MainActivity) {
                     shape = MaterialTheme.shapes.medium
                 ) {
                     Text("닫기")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhotosPerPagePicker(activity: MainActivity) {
+    val options = MainActivity.ALLOWED_PHOTOS_PER_PAGE
+    val selected = activity.photosPerPage
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        options.forEach { count ->
+            val isSelected = selected == count
+            Surface(
+                onClick = { activity.applyPhotosPerPage(count) },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(40.dp),
+                shape = MaterialTheme.shapes.small,
+                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        "${count}장",
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

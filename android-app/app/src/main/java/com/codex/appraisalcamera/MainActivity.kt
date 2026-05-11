@@ -102,6 +102,9 @@ class MainActivity : ComponentActivity() {
      */
     var categoryOrder by mutableStateOf<List<String>>(DEFAULT_CATEGORY_ORDER)
 
+    /** 사진자료 한 페이지에 들어갈 사진 수. 짝수 (2/4/6) 만 허용, 기본 4. */
+    var photosPerPage by mutableStateOf(DEFAULT_PHOTOS_PER_PAGE)
+
     // ---- Non-UI state ----
     private var imageCapture: ImageCapture? = null
     private var pendingExportBytes: ByteArray? = null
@@ -132,6 +135,7 @@ class MainActivity : ComponentActivity() {
         loadEmailRecipient()
         loadMailApp()
         loadCategoryOrder()
+        loadPhotosPerPage()
         restoreControlState(savedInstanceState)
 
         setContent {
@@ -657,6 +661,23 @@ class MainActivity : ComponentActivity() {
         saveCategoryOrder()
     }
 
+    // ---- Photos per page ----
+
+    private fun loadPhotosPerPage() {
+        val saved = prefs().getInt(PREF_PHOTOS_PER_PAGE, DEFAULT_PHOTOS_PER_PAGE)
+        photosPerPage = if (saved in ALLOWED_PHOTOS_PER_PAGE) saved else DEFAULT_PHOTOS_PER_PAGE
+    }
+
+    private fun savePhotosPerPage() {
+        prefs().edit().putInt(PREF_PHOTOS_PER_PAGE, photosPerPage).apply()
+    }
+
+    fun applyPhotosPerPage(value: Int) {
+        if (value !in ALLOWED_PHOTOS_PER_PAGE) return
+        photosPerPage = value
+        savePhotosPerPage()
+    }
+
     private fun symbolRank(photo: PhotoItem): Int {
         if (photo.category == CATEGORY_FIELD || photo.category == CATEGORY_LAND) {
             return photo.symbol.toIntOrNull() ?: 9999
@@ -1010,7 +1031,7 @@ class MainActivity : ComponentActivity() {
         if (exportPhotos.isEmpty()) {
             throw IOException("저장할 수 있는 사진이 없습니다")
         }
-        val result = PptxExporter.createWithStats(this, exportPhotos, documentHeaderText())
+        val result = PptxExporter.createWithStats(this, exportPhotos, documentHeaderText(), photosPerPage)
         if (result.skipped > 0) {
             runOnUiSafely {
                 Toast.makeText(this, "${result.skipped}장 누락 (디코드 실패)", Toast.LENGTH_LONG).show()
@@ -1023,7 +1044,8 @@ class MainActivity : ComponentActivity() {
     private fun createPdfBytes(onProgress: (Int, Int) -> Unit = { _, _ -> }): ByteArray {
         val sorted = sortedPhotos().filter { canReadPhoto(it.uri) }
         if (sorted.isEmpty()) throw IOException("저장할 수 있는 사진이 없습니다")
-        val totalPages = (sorted.size + 1) / 2
+        val perPage = photosPerPage
+        val totalPages = (sorted.size + perPage - 1) / perPage
         val document = PdfDocument()
         val pageWidth = 595
         val pageHeight = 842
@@ -1031,13 +1053,13 @@ class MainActivity : ComponentActivity() {
         try {
             var i = 0
             while (i < sorted.size) {
-                val pageNumber = (i / 2) + 1
+                val pageNumber = (i / perPage) + 1
                 onProgress(pageNumber, totalPages)
                 val info = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
                 val page = document.startPage(info)
-                totalDrawn += drawOutputPage(page.canvas, pageWidth, pageHeight, sorted, i, pageNumber)
+                totalDrawn += drawOutputPage(page.canvas, pageWidth, pageHeight, sorted, i, pageNumber, perPage)
                 document.finishPage(page)
-                i += 2
+                i += perPage
             }
             val output = ByteArrayOutputStream()
             document.writeTo(output)
@@ -1057,26 +1079,27 @@ class MainActivity : ComponentActivity() {
     private fun createJpgFiles(onProgress: (Int, Int) -> Unit = { _, _ -> }): ArrayList<ExportFile> {
         val sorted = sortedPhotos().filter { canReadPhoto(it.uri) }
         if (sorted.isEmpty()) throw IOException("저장할 수 있는 사진이 없습니다")
-        val totalPages = (sorted.size + 1) / 2
+        val perPage = photosPerPage
+        val totalPages = (sorted.size + perPage - 1) / perPage
         val files = ArrayList<ExportFile>()
         val pageWidth = 1240
         val pageHeight = 1754
         var totalDrawn = 0
         var i = 0
         while (i < sorted.size) {
-            val pageNumber = (i / 2) + 1
+            val pageNumber = (i / perPage) + 1
             onProgress(pageNumber, totalPages)
             val bitmap = Bitmap.createBitmap(pageWidth, pageHeight, Bitmap.Config.ARGB_8888)
             try {
                 val canvas = Canvas(bitmap)
-                totalDrawn += drawOutputPage(canvas, pageWidth, pageHeight, sorted, i, pageNumber)
+                totalDrawn += drawOutputPage(canvas, pageWidth, pageHeight, sorted, i, pageNumber, perPage)
                 val output = ByteArrayOutputStream()
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output)
                 files.add(ExportFile(pageJpgFileName(pageNumber), JPG_MIME, output.toByteArray()))
             } finally {
                 bitmap.recycle()
             }
-            i += 2
+            i += perPage
         }
         val skipped = sorted.size - totalDrawn
         if (skipped > 0) {
@@ -1087,8 +1110,57 @@ class MainActivity : ComponentActivity() {
         return files
     }
 
-    /** @return 이 페이지에서 정상적으로 그려진 사진 수 (0~2). */
-    private fun drawOutputPage(canvas: Canvas, pageWidth: Int, pageHeight: Int, sorted: List<PhotoItem>, startIndex: Int, pageNumber: Int): Int {
+    /** 페이지 내 사진 슬롯 (frame + caption baseline). */
+    private data class PageSlot(val frame: RectF, val captionBaselineY: Float)
+
+    /**
+     * 595x842 (A4 portrait) 비율로 페이지의 사진 슬롯을 계산.
+     * count 는 2/4/6 만 지원 (짝수). 사진 수가 부족한 페이지에서도 동일 그리드 사용,
+     * 빈 슬롯은 호출 측에서 그리지 않음.
+     */
+    private fun computeSlots(pageWidth: Int, pageHeight: Int, count: Int): List<PageSlot> {
+        val sx = pageWidth / 595f
+        val sy = pageHeight / 842f
+        val sideMargin = 50f * sx
+        val topMargin = 120f * sy
+        val bottomMargin = 30f * sy
+        val gap = 12f * sy
+        val captionHeight = 28f * sy
+        val availWidth = pageWidth - sideMargin * 2
+        val availHeight = pageHeight - topMargin - bottomMargin
+
+        val (cols, rows) = when (count) {
+            2 -> 1 to 2
+            6 -> 2 to 3
+            else -> 2 to 2 // 4 (default)
+        }
+        val photoWidth = (availWidth - gap * (cols - 1)) / cols
+        val rowHeight = availHeight / rows
+        val photoHeight = rowHeight - captionHeight - gap
+
+        val slots = ArrayList<PageSlot>(cols * rows)
+        for (r in 0 until rows) {
+            for (c in 0 until cols) {
+                val left = sideMargin + c * (photoWidth + gap)
+                val top = topMargin + r * rowHeight
+                val frame = RectF(left, top, left + photoWidth, top + photoHeight)
+                val baseline = top + photoHeight + captionHeight - 8f
+                slots.add(PageSlot(frame, baseline))
+            }
+        }
+        return slots
+    }
+
+    /** @return 이 페이지에서 정상적으로 그려진 사진 수. */
+    private fun drawOutputPage(
+        canvas: Canvas,
+        pageWidth: Int,
+        pageHeight: Int,
+        sorted: List<PhotoItem>,
+        startIndex: Int,
+        pageNumber: Int,
+        perPage: Int
+    ): Int {
         val sx = pageWidth / 595f
         val sy = pageHeight / 842f
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
@@ -1109,12 +1181,15 @@ class MainActivity : ComponentActivity() {
         paint.textSize = 10f * sx
         canvas.drawText("Page : $pageNumber", 530f * sx, 105f * sy, paint)
 
+        val slots = computeSlots(pageWidth, pageHeight, perPage)
+        // 캡션 폰트 크기는 슬롯 너비에 비례 — 4/6장 그리드에서는 자동으로 작아짐.
+        val captionScale = (slots[0].frame.width() / (455f * sx)).coerceIn(0.5f, 1.0f) * sx
         var drawnCount = 0
-        if (drawOutputPhoto(canvas, sorted[startIndex], RectF(70f * sx, 120f * sy, 525f * sx, 335f * sy), 348f * sy, sx)) {
-            drawnCount++
-        }
-        if (startIndex + 1 < sorted.size) {
-            if (drawOutputPhoto(canvas, sorted[startIndex + 1], RectF(70f * sx, 430f * sy, 525f * sx, 645f * sy), 658f * sy, sx)) {
+        for (slotIndex in slots.indices) {
+            val photoIndex = startIndex + slotIndex
+            if (photoIndex >= sorted.size) break
+            val slot = slots[slotIndex]
+            if (drawOutputPhoto(canvas, sorted[photoIndex], slot.frame, slot.captionBaselineY, captionScale)) {
                 drawnCount++
             }
         }
@@ -1649,6 +1724,9 @@ class MainActivity : ComponentActivity() {
         const val CATEGORY_CUSTOM = "custom"
         const val CATEGORY_FIELD = "field"
         const val PREF_CATEGORY_ORDER = "category_order"
+        const val PREF_PHOTOS_PER_PAGE = "photos_per_page"
+        const val DEFAULT_PHOTOS_PER_PAGE = 4
+        val ALLOWED_PHOTOS_PER_PAGE = listOf(2, 4, 6)
         val CATEGORY_ORDER = arrayOf(CATEGORY_LAND, CATEGORY_BUILDING, CATEGORY_EXTRA, CATEGORY_CUSTOM, CATEGORY_FIELD)
         val DEFAULT_CATEGORY_ORDER = listOf(CATEGORY_LAND, CATEGORY_BUILDING, CATEGORY_EXTRA, CATEGORY_CUSTOM)
         val LAND_SYMBOLS = Array(99) { (it + 1).toString() }
