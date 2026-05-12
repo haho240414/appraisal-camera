@@ -1,0 +1,85 @@
+name: Build Play Store AAB
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "android-app/**"
+      - ".github/workflows/play-store-bundle.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: play-store-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    name: Build signed Android App Bundle
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    env:
+      APP_VERSION_CODE: ${{ github.run_number }}
+      APP_VERSION_NAME: 1.0.${{ github.run_number }}
+      HAS_RELEASE_SIGNING: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Require release signing secrets
+        if: env.HAS_RELEASE_SIGNING != 'true'
+        run: |
+          echo "::error::Play Store에 올릴 AAB는 업로드 키로 서명되어야 합니다."
+          echo "::error::ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD GitHub Secrets를 먼저 등록하세요."
+          exit 1
+
+      - name: Decode upload key
+        run: |
+          mkdir -p android-app/keystore
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android-app/keystore/upload.jks
+          test -s android-app/keystore/upload.jks
+
+      - name: Build signed release bundle
+        working-directory: android-app
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/android-app/keystore/upload.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle :app:bundleRelease --no-daemon
+
+      - name: Run Android lint
+        working-directory: android-app
+        run: gradle :app:lintRelease --no-daemon
+
+      - name: Verify bundle exists
+        run: |
+          AAB="android-app/app/build/outputs/bundle/release/app-release.aab"
+          test -s "$AAB"
+          ls -lh "$AAB"
+
+      - name: Upload Play Store bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: appraisal-camera-play-store-aab-${{ github.run_number }}
+          path: android-app/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error

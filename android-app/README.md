@@ -80,3 +80,16 @@ keytool -genkeypair -v -keystore appraisal-camera-release.jks -alias appraisal-c
 4. 등록 후 새 커밋을 푸시하거나 `Release Android APK` 워크플로를 수동 실행하면, 업데이트 가능한 서명 APK가 릴리즈됩니다.
 
 서명키 파일과 비밀번호는 절대 공개 저장소에 올리면 안 됩니다. 키를 잃어버리면 같은 앱으로 업데이트를 이어갈 수 없으니 안전한 곳에 보관하세요.
+
+## Play Store용 AAB 만들기
+
+Google Play Store 신규 앱은 APK가 아니라 Android App Bundle(`.aab`)을 업로드합니다.
+
+1. 위의 GitHub Secrets 4개를 등록합니다.
+2. GitHub 저장소의 `Actions` 탭을 엽니다.
+3. `Build Play Store AAB` 워크플로를 선택합니다.
+4. `Run workflow`를 누릅니다.
+5. 성공한 실행의 Artifacts에서 `app-release.aab`가 들어 있는 파일을 내려받습니다.
+6. Google Play Console의 테스트 트랙 또는 프로덕션 트랙에 해당 AAB를 업로드합니다.
+
+Play Store 제출 체크리스트와 스토어 문구 초안은 저장소 루트의 `play-store-submission.md`를 참고하세요.
