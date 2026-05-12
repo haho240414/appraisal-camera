@@ -1112,8 +1112,7 @@ class MainActivity : ComponentActivity() {
 
     fun applyMailApp(value: String) {
         saveMailApp(value)
-        val label = if (value == MAIL_APP_GMAIL) "Gmail" else "Other"
-        Toast.makeText(this, "${label}로 설정했습니다.", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "${mailAppLabel(value)}(으)로 설정했습니다.", Toast.LENGTH_SHORT).show()
     }
 
     fun applyGuideAlpha(percent: Int) {
@@ -1849,7 +1848,11 @@ class MainActivity : ComponentActivity() {
 
     private fun loadMailApp() {
         val v = prefs().getString(PREF_MAIL_APP, MAIL_APP_OTHER) ?: MAIL_APP_OTHER
-        mailAppPref = if (v == "chooser" || v == "naver") MAIL_APP_OTHER else v
+        // 'chooser' 는 옛날 프리뷰값 — Other 로 정규화. 'naver' 는 정식 지원.
+        mailAppPref = when (v) {
+            MAIL_APP_GMAIL, MAIL_APP_NAVER, MAIL_APP_OTHER -> v
+            else -> MAIL_APP_OTHER
+        }
     }
 
     private fun saveMailApp(mailApp: String) {
@@ -1857,11 +1860,17 @@ class MainActivity : ComponentActivity() {
         prefs().edit().putString(PREF_MAIL_APP, mailApp).apply()
     }
 
-    private fun selectedMailPackage(): String =
-        if (mailAppPref == MAIL_APP_GMAIL) GMAIL_PACKAGE else ""
+    private fun selectedMailPackage(): String = when (mailAppPref) {
+        MAIL_APP_GMAIL -> GMAIL_PACKAGE
+        MAIL_APP_NAVER -> NAVER_PACKAGE
+        else -> ""
+    }
 
-    fun mailAppLabel(mailApp: String): String =
-        if (mailApp == MAIL_APP_GMAIL) "Gmail" else "Other"
+    fun mailAppLabel(mailApp: String): String = when (mailApp) {
+        MAIL_APP_GMAIL -> "Gmail"
+        MAIL_APP_NAVER -> "네이버 메일"
+        else -> "기타 앱"
+    }
 
     // ---- helpers ----
 
@@ -1937,7 +1946,9 @@ class MainActivity : ComponentActivity() {
         const val STATE_CURRENT_MEMO = "state_current_memo"
         const val MAIL_APP_OTHER = "other"
         const val MAIL_APP_GMAIL = "gmail"
+        const val MAIL_APP_NAVER = "naver"
         const val GMAIL_PACKAGE = "com.google.android.gm"
+        const val NAVER_PACKAGE = "com.nhn.android.mail"
         const val PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         const val PDF_MIME = "application/pdf"
         const val JPG_MIME = "image/jpeg"

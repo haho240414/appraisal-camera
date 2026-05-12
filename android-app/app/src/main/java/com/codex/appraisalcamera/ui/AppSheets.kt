@@ -687,7 +687,11 @@ private fun ModeDialog(activity: MainActivity) {
 
 @Composable
 private fun MailAppDialog(activity: MainActivity) {
-    val labels = listOf("Gmail" to MainActivity.MAIL_APP_GMAIL, "Other" to MainActivity.MAIL_APP_OTHER)
+    val labels = listOf(
+        "Gmail" to MainActivity.MAIL_APP_GMAIL,
+        "네이버 메일" to MainActivity.MAIL_APP_NAVER,
+        "기타 앱 (선택지에서 직접 고르기)" to MainActivity.MAIL_APP_OTHER
+    )
     AlertDialog(
         onDismissRequest = { activity.closeSheet() },
         title = { Text("기본 공유 방식", fontWeight = FontWeight.Bold) },
