@@ -30,6 +30,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
@@ -114,7 +115,7 @@ class MainActivity : ComponentActivity() {
     private var pendingExportLabel: String = ""
 
     // ActivityResult launchers
-    private lateinit var pickImageLauncher: ActivityResultLauncher<Array<String>>
+    private lateinit var pickImageLauncher: ActivityResultLauncher<PickVisualMediaRequest>
     private lateinit var createOutputLauncher: ActivityResultLauncher<Intent>
     private lateinit var cameraPermissionLauncher: ActivityResultLauncher<String>
 
@@ -173,17 +174,21 @@ class MainActivity : ComponentActivity() {
 
     private fun registerActivityResultLaunchers() {
         pickImageLauncher = registerForActivityResult(
-            ActivityResultContracts.OpenDocument()
+            ActivityResultContracts.PickVisualMedia()
         ) { uri ->
             if (uri == null) return@registerForActivityResult
+            // 갤러리에서 고른 사진은 시스템 Photo Picker 가 1회용 권한만 부여하므로
+            // 앱 내부 폴더로 즉시 사본 저장 → 촬영 사진과 동일한 file:// 경로로 보관.
+            val capturedAt = System.currentTimeMillis()
             try {
-                contentResolver.takePersistableUriPermission(
-                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (_: SecurityException) {
-                // 일부 갤러리 앱은 임시 접근만 부여.
+                val outputFile = createAppImageFile(capturedAt)
+                contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(outputFile).use { output -> input.copyTo(output) }
+                } ?: throw IOException("Cannot open picked image stream")
+                addPhoto(Uri.fromFile(outputFile).toString(), capturedAt, false)
+            } catch (e: Exception) {
+                Toast.makeText(this, "이미지를 불러올 수 없습니다.", Toast.LENGTH_SHORT).show()
             }
-            addPhoto(uri.toString())
         }
 
         createOutputLauncher = registerForActivityResult(
@@ -255,7 +260,10 @@ class MainActivity : ComponentActivity() {
     }
 
     fun pickImage() {
-        pickImageLauncher.launch(arrayOf("image/*"))
+        // 시스템 Photo Picker — 갤러리(이미지 전용)를 바로 띄움.
+        pickImageLauncher.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+        )
     }
 
     fun capturePhoto() {
@@ -479,6 +487,14 @@ class MainActivity : ComponentActivity() {
 
     @Throws(IOException::class)
     private fun decodeBitmap(uri: Uri, maxSideLimit: Int): Bitmap? {
+        // 1) byte array 디코드를 우선 시도 — 한글 경로/SAF URI 등 경로 인코딩
+        // 문제를 모두 우회. 메모리는 잠깐 file 크기만큼 잡지만 사진 1장이라
+        // 부담 없음.
+        readUriBytes(uri)?.let { bytes ->
+            decodeByteArrayBitmap(bytes, maxSideLimit)?.let { return it }
+        }
+
+        // 2) 폴백: file path 직접 디코드.
         if (uri.scheme == "file") {
             val file = fileFromUri(uri)
             if (file != null) {
@@ -486,7 +502,29 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // 3) 마지막 폴백: stream 디코드 (구 동작).
         return decodeStreamBitmap(uri, maxSideLimit)
+    }
+
+    private fun readUriBytes(uri: Uri): ByteArray? = try {
+        openImageInputStream(uri)?.use { it.readBytes() }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun decodeByteArrayBitmap(bytes: ByteArray, maxSideLimit: Int): Bitmap? {
+        if (bytes.isEmpty()) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val maxSide = maxOf(bounds.outWidth, bounds.outHeight)
+        var sample = 1
+        while (maxSide / sample > maxSideLimit) sample *= 2
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
     }
 
     private fun decodeFileBitmap(file: File, maxSideLimit: Int): Bitmap? {
@@ -1427,19 +1465,23 @@ class MainActivity : ComponentActivity() {
         var drewPhoto = false
         try {
             val uri = Uri.parse(photo.uri)
-            // 1차 시도: 1400px (PDF/JPG 출력 프레임이 ~1200x510px 정도여서 충분).
-            bitmap = decodeBitmap(uri, 1400)
-            // 2차 시도: 메모리 부족 등으로 1차 실패 시 더 작게.
-            if (bitmap == null) {
-                bitmap = decodeBitmap(uri, 800)
+            // 사이즈 폴백 사슬: 1800 → 1200 → 800 → 400. PPTX 의 1800 와 동일하게
+            // 시작해 디코드 실패 시 점차 작게 시도. 단계별로 try/catch.
+            for (maxSide in intArrayOf(1800, 1200, 800, 400)) {
+                bitmap = try {
+                    decodeBitmap(uri, maxSide)
+                } catch (_: Throwable) { null }
+                if (bitmap != null) break
             }
             if (bitmap != null) {
-                oriented = rotateBitmap(bitmap, readExifOrientation(uri))
+                oriented = try {
+                    rotateBitmap(bitmap, readExifOrientation(uri))
+                } catch (_: Throwable) { bitmap }
                 drawBitmapCenterCrop(canvas, oriented, frame, paint)
                 drewPhoto = true
             }
         } catch (_: Throwable) {
-            // OOM 등 어떤 오류든 이 사진만 skip — 회색 박스는 이미 그려져 있음.
+            // 어떤 오류든 이 사진만 skip — 회색 박스는 이미 그려져 있음.
         } finally {
             if (oriented != null && oriented !== bitmap) oriented.recycle()
             bitmap?.recycle()
@@ -1462,17 +1504,20 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun drawBitmapCenterCrop(canvas: Canvas, bitmap: Bitmap, dst: RectF, paint: Paint) {
+        if (bitmap.width <= 0 || bitmap.height <= 0) return
+        if (dst.width() <= 0f || dst.height() <= 0f) return
         val s = maxOf(dst.width() / bitmap.width, dst.height() / bitmap.height)
-        val srcW = dst.width() / s
-        val srcH = dst.height() / s
-        val left = (bitmap.width - srcW) / 2f
-        val top = (bitmap.height - srcH) / 2f
-        val src = Rect(
-            maxOf(0, left.roundToIntSafe()),
-            maxOf(0, top.roundToIntSafe()),
-            minOf(bitmap.width, (left + srcW).roundToIntSafe()),
-            minOf(bitmap.height, (top + srcH).roundToIntSafe())
-        )
+        if (s <= 0f) return
+        val srcW = (dst.width() / s).coerceAtMost(bitmap.width.toFloat())
+        val srcH = (dst.height() / s).coerceAtMost(bitmap.height.toFloat())
+        val left = ((bitmap.width - srcW) / 2f).coerceAtLeast(0f)
+        val top = ((bitmap.height - srcH) / 2f).coerceAtLeast(0f)
+        val srcLeft = left.roundToIntSafe().coerceAtLeast(0)
+        val srcTop = top.roundToIntSafe().coerceAtLeast(0)
+        val srcRight = (srcLeft + srcW.roundToIntSafe()).coerceAtMost(bitmap.width)
+        val srcBottom = (srcTop + srcH.roundToIntSafe()).coerceAtMost(bitmap.height)
+        if (srcRight <= srcLeft || srcBottom <= srcTop) return
+        val src = Rect(srcLeft, srcTop, srcRight, srcBottom)
         canvas.drawBitmap(bitmap, src, dst, paint)
     }
 
