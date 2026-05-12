@@ -18,6 +18,7 @@ sealed class AppSheet {
     data object ExportFormat : AppSheet()
     data class ShareFormat(val recipient: String) : AppSheet()
     data object ConfirmClear : AppSheet()
+    data object ConfirmClearPhotosOnly : AppSheet()
     data class ConfirmDelete(val photo: MainActivity.PhotoItem) : AppSheet()
 
     /**

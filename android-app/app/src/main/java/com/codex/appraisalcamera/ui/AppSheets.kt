@@ -79,6 +79,7 @@ fun AppSheets(activity: MainActivity) {
         AppSheet.ExportFormat -> ExportFormatDialog(activity)
         is AppSheet.ShareFormat -> ShareFormatDialog(activity, sheet.recipient)
         AppSheet.ConfirmClear -> ConfirmClearDialog(activity)
+        AppSheet.ConfirmClearPhotosOnly -> ConfirmClearPhotosOnlyDialog(activity)
         is AppSheet.ConfirmDelete -> ConfirmDeleteDialog(activity, sheet.photo)
         is AppSheet.ExportProgress -> ExportProgressSheet(sheet.format, sheet.current, sheet.total)
         AppSheet.Sessions -> SessionsSheet(activity)
@@ -129,6 +130,18 @@ private fun PhotoListSheet(activity: MainActivity) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 6.dp)
                 )
+            }
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedButton(
+                onClick = { activity.confirmClearPhotosOnly() },
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Text("현재 사진만 전체 삭제", fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(12.dp))
 
@@ -473,7 +486,7 @@ private fun HelpSheet(activity: MainActivity) {
         "채무자 / 답사자" to "현지답사 모드에서만 표시. 사진 설명에 함께 저장됩니다.",
         "저장" to "PPTX / PDF / JPG 중 선택해 외부 저장소에 저장.",
         "공유" to "Gmail 또는 다른 앱으로 사진자료 공유.",
-        "목록" to "등록된 사진을 분류 순서로 확인 / 개별 삭제.",
+        "목록" to "등록된 사진 확인 / 개별 삭제 / 현재 사진만 전체 삭제.",
         "전체삭제" to "사진 + 앱 내부 파일 모두 제거. 되돌릴 수 없습니다.",
         "설정" to "메일주소 / 공유앱 / 가이드 투명도·크기.",
         "토지 / 건물 / 제시외 / 기타" to "토지=숫자, 건물=가나다, 제시외=ㄱㄴㄷ, 기타=직접입력.",
@@ -811,6 +824,36 @@ private fun ConfirmClearDialog(activity: MainActivity) {
         },
         dismissButton = {
             TextButton(onClick = { activity.closeSheet() }) { Text("취소") }
+        }
+    )
+}
+
+@Composable
+private fun ConfirmClearPhotosOnlyDialog(activity: MainActivity) {
+    AlertDialog(
+        onDismissRequest = { activity.openSheet = AppSheet.PhotoList },
+        title = { Text("현재 사진만 전체 삭제", fontWeight = FontWeight.Bold) },
+        text = {
+            Text(
+                "현재 목록의 사진 ${activity.photos.size}장만 비웁니다. 저장된 작업과 사진 파일은 유지됩니다.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    activity.applyClearPhotosOnly()
+                    activity.closeSheet()
+                },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) { Text("삭제", fontWeight = FontWeight.SemiBold) }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = { activity.openSheet = AppSheet.PhotoList }
+            ) { Text("취소") }
         }
     )
 }

@@ -646,6 +646,17 @@ class MainActivity : ComponentActivity() {
         savePhotos()
     }
 
+    fun confirmClearPhotosOnly() {
+        if (photos.isEmpty()) return
+        openSheet = AppSheet.ConfirmClearPhotosOnly
+    }
+
+    /** 현재 사진 목록만 비운다. 저장된 작업과 실제 사진 파일은 유지한다. */
+    fun applyClearPhotosOnly() {
+        photos.clear()
+        savePhotos()
+    }
+
     /** PhotoList 시트에서 개별 사진 삭제 확인 인텐트. */
     fun confirmDeletePhoto(item: PhotoItem) {
         openSheet = AppSheet.ConfirmDelete(item)
