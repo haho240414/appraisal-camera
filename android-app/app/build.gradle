@@ -4,6 +4,12 @@ plugins {
     id "org.jetbrains.kotlin.plugin.compose"
 }
 
+def releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+def releaseKeystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+def releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+def releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+def hasReleaseSigning = releaseKeystorePath && releaseKeystorePassword && releaseKeyAlias && releaseKeyPassword
+
 android {
     namespace "com.codex.appraisalcamera"
     compileSdk 35
@@ -18,6 +24,27 @@ android {
         // `=` 로 명시적 property 할당 + Integer.parseInt 로 안전하게 처리.
         versionCode = Integer.parseInt(System.getenv("APP_VERSION_CODE") ?: "1")
         versionName = System.getenv("APP_VERSION_NAME") ?: "1.0"
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseKeystorePath)
+                storePassword releaseKeystorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
+        }
     }
 
     compileOptions {

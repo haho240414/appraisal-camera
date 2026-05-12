@@ -37,6 +37,7 @@ jobs:
       # versionCode 는 run number 로 자동 증가 → 사용자 OS가 정상 업데이트로 인식.
       APP_VERSION_CODE: ${{ github.run_number }}
       APP_VERSION_NAME: 1.0.${{ github.run_number }}
+      HAS_RELEASE_SIGNING: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
 
     steps:
       - name: Checkout
@@ -56,9 +57,35 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Require release signing secrets
+        if: github.event_name != 'pull_request' && env.HAS_RELEASE_SIGNING != 'true'
+        run: |
+          echo "::error::업데이트 설치가 가능한 APK를 만들려면 ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD GitHub Secrets가 필요합니다."
+          echo "::error::android-app/README.md의 '기존 앱 위에 업데이트 설치되게 만들기' 안내에 따라 Secrets를 먼저 등록하세요."
+          exit 1
+
+      - name: Decode release signing key
+        if: env.HAS_RELEASE_SIGNING == 'true'
+        run: |
+          mkdir -p android-app/keystore
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android-app/keystore/release.jks
+          test -s android-app/keystore/release.jks
+
       - name: Build APK
         working-directory: android-app
-        run: gradle :app:assembleDebug --no-daemon
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/android-app/keystore/release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ "${HAS_RELEASE_SIGNING}" = "true" ]; then
+            echo "Building release APK with stable signing key."
+            gradle :app:assembleRelease --no-daemon
+          else
+            echo "::warning::Release signing secrets are missing. Building debug APK; Android may require uninstall before installing future builds."
+            gradle :app:assembleDebug --no-daemon
+          fi
 
       - name: Run Android lint
         working-directory: android-app
@@ -69,8 +96,13 @@ jobs:
         id: locate
         run: |
           # ABI splits + universalApk=true 사용 시 universal 파일명이 환경에 따라 달라질 수 있어 동적 탐색.
-          APK_DIR="android-app/app/build/outputs/apk/debug"
-          APK="$(ls "$APK_DIR"/app-universal-debug.apk 2>/dev/null || ls "$APK_DIR"/app-debug.apk)"
+          if [ "${HAS_RELEASE_SIGNING}" = "true" ]; then
+            APK_DIR="android-app/app/build/outputs/apk/release"
+            APK="$(ls "$APK_DIR"/app-universal-release.apk 2>/dev/null || ls "$APK_DIR"/app-release.apk)"
+          else
+            APK_DIR="android-app/app/build/outputs/apk/debug"
+            APK="$(ls "$APK_DIR"/app-universal-debug.apk 2>/dev/null || ls "$APK_DIR"/app-debug.apk)"
+          fi
           test -s "$APK"
           echo "apk=$APK" >> "$GITHUB_OUTPUT"
 
@@ -82,6 +114,12 @@ jobs:
           grep "package: name='com.codex.appraisalcamera'" apk-badging.txt
           grep "launchable-activity: name='com.codex.appraisalcamera.MainActivity'" apk-badging.txt
           grep "versionCode='${APP_VERSION_CODE}'" apk-badging.txt
+
+      - name: Verify APK signature
+        run: |
+          APK="${{ steps.locate.outputs.apk }}"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          "$APKSIGNER" verify --print-certs "$APK"
 
       - name: Prepare APK
         run: cp "${{ steps.locate.outputs.apk }}" appraisalcamera-camera-screen.apk
@@ -102,4 +140,4 @@ jobs:
           TAG="camera-screen-apk-${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" appraisalcamera-camera-screen.apk \
             --title "Camera Screen APK #${GITHUB_RUN_NUMBER}" \
-            --notes "카메라 화면에서 바로 토지/건물/제시외와 기호를 선택하는 버전입니다. 휴대폰에서 appraisalcamera-camera-screen.apk 파일을 내려받아 설치하세요."
+            --notes "카메라 화면에서 바로 토지/건물/제시외와 기호를 선택하는 버전입니다. 릴리즈 서명키가 설정된 뒤부터는 기존 앱을 지우지 않고 APK를 눌러 업데이트 설치할 수 있습니다."
