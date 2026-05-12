@@ -10,3 +10,7 @@ local.properties
 *.jks
 *.keystore
 android-app/keystore/
+ios-app/**/DerivedData/
+ios-app/**/build/
+ios-app/**/*.xcuserdata/
+ios-app/**/*.xcuserstate

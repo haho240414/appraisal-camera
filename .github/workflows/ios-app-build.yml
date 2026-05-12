@@ -1,0 +1,41 @@
+name: Build iOS App
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "ios-app/**"
+      - ".github/workflows/ios-app-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-app-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build iOS app for simulator
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build
+        working-directory: ios-app/AppraisalCameraIOS
+        run: |
+          xcodebuild \
+            -project AppraisalCameraIOS.xcodeproj \
+            -target AppraisalCameraIOS \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build

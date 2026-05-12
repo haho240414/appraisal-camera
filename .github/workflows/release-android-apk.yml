@@ -11,6 +11,8 @@ on:
       - "*.html"
       - "*.css"
       - "app.js"
+      - "ios-app/**"
+      - ".github/workflows/ios-app-build.yml"
   pull_request:
     branches:
       - main
@@ -19,6 +21,8 @@ on:
       - "*.html"
       - "*.css"
       - "app.js"
+      - "ios-app/**"
+      - ".github/workflows/ios-app-build.yml"
 
 permissions:
   contents: write
